@@ -12,17 +12,38 @@ const authJwt = require('./helpers/jwt');
 const errorHandler = require('./helpers/error-handler');
 
 // Strict CORS Policy for JGM Industries
-const allowedOrigins = ['https://www.jgmindustries.com', 'https://admin.jgmindustries.com', 'http://localhost:3000'];
-app.use(cors({
+const allowedOrigins = ['https://www.jgmindustries.com', 'https://admin.jgmindustries.com', 'http://localhost:3000','http://localhost:5173'];
+
+const corsOptions = {
     origin: function(origin, callback){
+        // allow requests with no origin (like mobile apps or curl requests)
         if(!origin) return callback(null, true);
+        
         if(allowedOrigins.indexOf(origin) === -1){
             const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
             return callback(new Error(msg), false);
         }
         return callback(null, true);
     }
-}));
+};
+
+// 1. Apply strict policy to standard requests (GET, POST, etc.)
+app.use(cors(corsOptions));
+
+// 2. Apply the EXACT SAME strict policy to Preflight (OPTIONS) requests
+app.options('*', cors(corsOptions));
+
+
+// app.use(cors({
+//     origin: function(origin, callback){
+//         if(!origin) return callback(null, true);
+//         if(allowedOrigins.indexOf(origin) === -1){
+//             const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+//             return callback(new Error(msg), false);
+//         }
+//         return callback(null, true);
+//     }
+// }));
 
 // --- NEW SECURITY MIDDLEWARE ---
 // 1. Secure HTTP headers
