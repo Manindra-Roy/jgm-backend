@@ -8,7 +8,7 @@ const categorySchema = mongoose.Schema({
     icon: {
         type: String,
     },
-    color: { 
+    color: {
         type: String,
     }
 })

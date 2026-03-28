@@ -67,7 +67,6 @@ router.post('/', async (req,res)=>{
     res.send(order);
 })
 
-
 router.put('/:id',async (req, res)=> {
     const order = await Order.findByIdAndUpdate(
         req.params.id,
@@ -83,9 +82,8 @@ router.put('/:id',async (req, res)=> {
     res.send(order);
 })
 
-
 router.delete('/:id', (req, res)=>{
-    Order.findByIdAndRemove(req.params.id).then(async order =>{
+    Order.findByIdAndDelete(req.params.id).then(async order =>{
         if(order) {
             await order.orderItems.map(async orderItem => {
                 await OrderItem.findByIdAndRemove(orderItem)
@@ -100,27 +98,31 @@ router.delete('/:id', (req, res)=>{
 })
 
 router.get('/get/totalsales', async (req, res)=> {
-    const totalSales= await Order.aggregate([
-        { $group: { _id: null , totalsales : { $sum : '$totalPrice'}}}
-    ])
+    try {
+        const totalSales = await Order.aggregate([
+            { $group: { _id: null , totalsales : { $sum : '$totalPrice'}}}
+        ]);
 
-    if(!totalSales) {
-        return res.status(400).send('The order sales cannot be generated')
+        // If the array is empty (no orders), return 0
+        if(!totalSales || totalSales.length === 0) {
+            return res.status(200).send({ totalsales: 0 });
+        }
+
+        res.send({ totalsales: totalSales.pop().totalsales });
+    } catch (err) {
+        res.status(500).send('The order sales cannot be generated');
     }
-
-    res.send({totalsales: totalSales.pop().totalsales})
-})
+});
 
 router.get(`/get/count`, async (req, res) =>{
-    const orderCount = await Order.countDocuments((count) => count)
-
-    if(!orderCount) {
-        res.status(500).json({success: false})
-    } 
-    res.send({
-        orderCount: orderCount
-    });
-})
+    try {
+        const orderCount = await Order.countDocuments();
+        // Since 0 is a valid number, we just send it directly!
+        res.status(200).send({ orderCount: orderCount });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 
 router.get(`/get/userorders/:userid`, async (req, res) =>{
     const userOrderList = await Order.find({user: req.params.userid}).populate({ 

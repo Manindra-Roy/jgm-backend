@@ -74,7 +74,7 @@ const ordersRoutes = require('./routes/orders');
 const api = process.env.API_URL;
 
 // Apply rate limiter ONLY to user routes (login/register)
-app.use(`${api}/users`, authLimiter, usersRoutes);
+// app.use(`${api}/users`, authLimiter, usersRoutes);
 
 app.use(`${api}/categories`, categoriesRoutes);
 app.use(`${api}/products`, productsRoutes);

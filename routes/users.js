@@ -101,7 +101,6 @@ router.post('/login', async (req,res) => {
     
 })
 
-
 router.post('/register', async (req,res)=>{
     let user = new User({
         name: req.body.name,
@@ -125,7 +124,7 @@ router.post('/register', async (req,res)=>{
 
 
 router.delete('/:id', (req, res)=>{
-    User.findByIdAndRemove(req.params.id).then(user =>{
+    User.findByIdAndDelete(req.params.id).then(user =>{
         if(user) {
             return res.status(200).json({success: true, message: 'the user is deleted!'})
         } else {
@@ -137,15 +136,13 @@ router.delete('/:id', (req, res)=>{
 })
 
 router.get(`/get/count`, async (req, res) =>{
-    const userCount = await User.countDocuments((count) => count)
-
-    if(!userCount) {
-        res.status(500).json({success: false})
-    } 
-    res.send({
-        userCount: userCount
-    });
-})
+    try {
+        const userCount = await User.countDocuments();
+        res.status(200).send({ userCount: userCount });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 
 
 module.exports =router;

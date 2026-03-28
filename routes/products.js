@@ -84,6 +84,19 @@ router.post(`/`, uploadOptions.single('image'), async (req, res) => {
     res.send(product);
 });
 
+router.delete('/:id', async (req, res) => {
+    try {
+        const product = await Product.findByIdAndDelete(req.params.id);
+        if (product) {
+            return res.status(200).json({ success: true, message: 'Item deleted!' });
+        } else {
+            return res.status(404).json({ success: false, message: 'Item not found!' });
+        }
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err });
+    }
+});
+
 // ... (You can copy the PUT, DELETE, and GET COUNT routes from your original file, keeping in mind image handling requires Cloudinary for the gallery-images route as well).
 
 module.exports = router;
