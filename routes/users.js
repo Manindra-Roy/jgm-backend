@@ -3,6 +3,14 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+
+// Define the limiter
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // Limit each IP to 10 requests per window
+    message: { message: 'Too many attempts from this IP, please try again after 15 minutes' }
+});
 
 router.get(`/`, async (req, res) =>{
     const userList = await User.find().select('-passwordHash');
@@ -76,7 +84,7 @@ router.put('/:id',async (req, res)=> {
     res.send(user);
 })
 
-router.post('/login', async (req,res) => {
+router.post('/login', authLimiter, async (req,res) => {
     const user = await User.findOne({email: req.body.email})
     const secret = process.env.secret;
     if(!user) {
@@ -101,7 +109,7 @@ router.post('/login', async (req,res) => {
     
 })
 
-router.post('/register', async (req,res)=>{
+router.post('/register', authLimiter, async (req,res)=>{
     let user = new User({
         name: req.body.name,
         email: req.body.email,
