@@ -1,3 +1,4 @@
+// routes/products.js
 const { Product } = require('../models/product');
 const express = require('express');
 const { Category } = require('../models/category');
@@ -6,6 +7,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('cloudinary').v2;
+
 
 // Configure Cloudinary
 cloudinary.config({
@@ -52,6 +54,9 @@ router.get(`/`, async (req, res) => {
 
 // GET Single Product
 router.get(`/:id`, async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+        return res.status(400).send('Invalid Product Id');
+    }
     const product = await Product.findById(req.params.id).populate('category');
     if(!product) return res.status(500).json({success: false});
     res.send(product);
@@ -84,6 +89,53 @@ router.post(`/`, uploadOptions.single('image'), async (req, res) => {
     res.send(product);
 });
 
+// PUT Product (Update existing product, handle optional image change)
+router.put('/:id', uploadOptions.single('image'), async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+        return res.status(400).send('Invalid Product Id');
+    }
+
+    const category = await Category.findById(req.body.category);
+    if (!category) return res.status(400).send('Invalid Category');
+
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(400).send('Invalid Product!');
+
+    const file = req.file;
+    let imagepath;
+
+    // If a new file was uploaded, use the new Cloudinary path
+    // Otherwise, keep the old image path that is already in the database
+    if (file) {
+        imagepath = file.path;
+    } else {
+        imagepath = product.image;
+    }
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+        req.params.id,
+        {
+            name: req.body.name,
+            description: req.body.description,
+            richDescription: req.body.richDescription,
+            image: imagepath,
+            brand: req.body.brand,
+            price: req.body.price,
+            category: req.body.category,
+            countInStock: req.body.countInStock,
+            rating: req.body.rating,
+            numReviews: req.body.numReviews,
+            isFeatured: req.body.isFeatured,
+        },
+        // { new: true } // returns the newly updated data
+        { returnDocument: 'after' }
+    );
+
+    if (!updatedProduct) return res.status(500).send('the product cannot be updated!');
+    res.send(updatedProduct);
+});
+
+// DELETE Product
 router.delete('/:id', async (req, res) => {
     try {
         const product = await Product.findByIdAndDelete(req.params.id);
@@ -97,6 +149,15 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// ... (You can copy the PUT, DELETE, and GET COUNT routes from your original file, keeping in mind image handling requires Cloudinary for the gallery-images route as well).
+// GET Product Count (Useful for your dashboard)
+router.get(`/get/count`, async (req, res) => {
+    try {
+        const productCount = await Product.countDocuments();
+        res.status(200).send({ productCount: productCount });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 
 module.exports = router;

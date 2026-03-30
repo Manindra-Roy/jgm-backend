@@ -73,7 +73,8 @@ router.put('/:id',async (req, res)=> {
         {
             status: req.body.status
         },
-        { new: true}
+        // { new: true}
+        { returnDocument: 'after' }
     )
 
     if(!order)
@@ -135,7 +136,6 @@ router.get(`/get/userorders/:userid`, async (req, res) =>{
     } 
     res.send(userOrderList);
 })
-
 
 
 module.exports =router;
