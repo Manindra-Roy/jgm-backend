@@ -7,6 +7,13 @@ function authJwt() {
         secret,
         algorithms: ["HS256"],
         isRevoked: isRevoked,
+        // NEW: Tell it to extract the token from the cookie!
+        getToken: function (req) {
+            if (req.cookies && req.cookies.jgm_token) {
+                return req.cookies.jgm_token;
+            }
+            return null;
+        }
     }).unless({
         path: [
             { url: /\/public\/uploads(.*)/, methods: ["GET", "OPTIONS"] },
@@ -15,18 +22,16 @@ function authJwt() {
             { url: /\/api\/v1\/orders(.*)/, methods: ["GET", "OPTIONS", "POST"] },
             `${api}/users/login`,
             `${api}/users/register`,
+            `${api}/users/logout` // Add logout to unprotected paths
         ],
     });
 }
 
-// Updated isRevoked function for express-jwt v8+
 async function isRevoked(req, token) {
-    // token.payload contains the decoded JWT data (like isAdmin)
     if (!token.payload.isAdmin) {
-        return true; // Return true to revoke access
+        return true; 
     }
-
-    return false; // Return false to allow access
+    return false; 
 }
 
 module.exports = authJwt;

@@ -9,9 +9,10 @@ const mongoSanitize = require('express-mongo-sanitize');
 require('dotenv/config');
 const authJwt = require('./helpers/jwt');
 const errorHandler = require('./helpers/error-handler');
+const cookieParser = require('cookie-parser');
 
 // Strict CORS Policy for JGM Industries
-const allowedOrigins = ['https://www.jgmindustries.com', 'https://admin.jgmindustries.com', 'http://localhost:3000','http://localhost:5173'];
+const allowedOrigins = ['https://www.jgmindustries.in', 'https://admin.jgmindustries.in', 'http://localhost:3000','http://localhost:5173','http://localhost:5174'];
 
 const corsOptions = {
     origin: function(origin, callback){
@@ -23,8 +24,10 @@ const corsOptions = {
             return callback(new Error(msg), false);
         }
         return callback(null, true);
-    }
+    },
+    credentials: true // <--- THIS IS THE MISSING PIECE!
 };
+
 
 // 1. Apply strict policy to standard requests (GET, POST, etc.)
 app.use(cors(corsOptions));
@@ -41,6 +44,7 @@ app.use(mongoSanitize());
 
 // Middleware
 app.use(express.json());
+app.use(cookieParser());
 app.use(morgan('tiny'));
 app.use(authJwt());
 app.use(errorHandler);

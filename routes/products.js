@@ -38,6 +38,18 @@ router.get(`/`, async (req, res) => {
          filter = {category: req.query.categories.split(',')}
     }
 
+
+
+
+
+    // NEW: Search Filter (Case-insensitive regex search on the product name)
+    if(req.query.search) {
+         filter.name = { $regex: req.query.search, $options: 'i' };
+    }
+
+
+
+    
     // Pagination logic
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;

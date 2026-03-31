@@ -88,27 +88,42 @@ router.put('/:id',async (req, res)=> {
 router.post('/login', authLimiter, async (req,res) => {
     const user = await User.findOne({email: req.body.email})
     const secret = process.env.secret;
-    if(!user) {
-        return res.status(400).send('The user not found');
-    }
+    
+    if(!user) return res.status(400).send('The user not found');
 
     if(user && bcrypt.compareSync(req.body.password, user.passwordHash)) {
         const token = jwt.sign(
-            {
-                userId: user.id,
-                isAdmin: user.isAdmin
-            },
+            { userId: user.id, isAdmin: user.isAdmin },
             secret,
-            {expiresIn : '1d'}
-        )
+            { expiresIn : '1d' }
+        );
+
+        // Attach token as an HttpOnly cookie
+        res.cookie('jgm_token', token, {
+            httpOnly: true,
+            secure: false, // Keep false for localhost HTTP
+            sameSite: 'lax', // Changed from strict to lax for different localhost ports
+            maxAge: 24 * 60 * 60 * 1000 // 1 Day
+        });
        
-        res.status(200).send({user: user.email , token: token}) 
+
+
+        res.status(200).send({ message: 'Logged in successfully', user: user.email }); 
     } else {
        res.status(400).send('password is wrong!');
     }
+});
 
-    
-})
+// NEW: Logout Route
+router.post('/logout', (req, res) => {
+    // Must match the exact settings we used to create the cookie
+    res.clearCookie('jgm_token', {
+        httpOnly: true,
+        secure: false, 
+        sameSite: 'lax'
+    });
+    res.status(200).json({ message: 'Logged out successfully' });
+});
 
 router.post('/register', authLimiter, async (req,res)=>{
     let user = new User({
