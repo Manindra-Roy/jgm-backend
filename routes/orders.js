@@ -31,30 +31,87 @@ router.get(`/:id`, async (req, res) => {
   res.send(order);
 });
 
-// GET: Count of orders grouped by their Status
-router.get('/get/statuscounts', async (req, res) => {
-    try {
-        const statusCounts = await Order.aggregate([
-            {
-                // Group by the 'status' field and add 1 to the count for each document found
-                $group: {
-                    _id: "$status",
-                    count: { $sum: 1 }
-                }
-            }
-        ]);
+// GET: Unified Dashboard Statistics (Highly Optimized)
+router.get("/get/dashboard-stats", async (req, res) => {
+  try {
+    const totalOrders = await Order.countDocuments();
 
-        // MongoDB returns an array like: [{_id: 'Pending', count: 4}, {_id: 'Delivered', count: 12}]
-        // Let's format this into a clean, easy-to-use object for React
-        const formattedCounts = statusCounts.reduce((acc, curr) => {
-            acc[curr._id] = curr.count;
-            return acc;
-        }, {});
+    // 1. Group Statuses
+    const statusCountsAgg = await Order.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]);
+    const statusCounts = statusCountsAgg.reduce((acc, curr) => {
+      acc[curr._id] = curr.count;
+      return acc;
+    }, {});
 
-        res.status(200).send(formattedCounts);
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    // 2. Safe Total Sales (Converts string to numbers natively, ignores cancellations)
+    const salesAgg = await Order.aggregate([
+      { $match: { status: { $ne: "Cancelled" } } },
+      {
+        $group: {
+          _id: null,
+          totalSales: {
+            $sum: {
+              $convert: {
+                input: "$totalPrice",
+                to: "double",
+                onError: 0,
+                onNull: 0,
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const totalSales = salesAgg.length > 0 ? salesAgg[0].totalSales : 0;
+
+    // 3. Sales By Day (Last 14 days)
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 14);
+
+    const dailySales = await Order.aggregate([
+      {
+        $match: {
+          dateOrdered: { $gte: pastDate },
+          status: { $ne: "Cancelled" },
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$dateOrdered" } },
+          totalSales: {
+            $sum: {
+              $convert: {
+                input: "$totalPrice",
+                to: "double",
+                onError: 0,
+                onNull: 0,
+              },
+            },
+          },
+        },
+      },
+      { $sort: { _id: 1 } }, // Sort chronologically
+    ]);
+
+    // 4. Fetch only the 5 most recent orders for the table
+    const recentOrders = await Order.find()
+      .populate("user", "name")
+      .sort({ dateOrdered: -1 })
+      .limit(5);
+
+    // Send everything in one single payload
+    res.status(200).json({
+      totalOrders,
+      statusCounts,
+      totalSales,
+      dailySales,
+      recentOrders,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 router.post("/", async (req, res) => {
@@ -147,23 +204,6 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-router.get("/get/totalsales", async (req, res) => {
-  try {
-    const totalSales = await Order.aggregate([
-      { $group: { _id: null, totalsales: { $sum: "$totalPrice" } } },
-    ]);
-
-    // If the array is empty (no orders), return 0
-    if (!totalSales || totalSales.length === 0) {
-      return res.status(200).send({ totalsales: 0 });
-    }
-
-    res.send({ totalsales: totalSales.pop().totalsales });
-  } catch (err) {
-    res.status(500).send("The order sales cannot be generated");
-  }
-});
-
 router.get(`/get/count`, async (req, res) => {
   try {
     const orderCount = await Order.countDocuments();
@@ -189,35 +229,6 @@ router.get(`/get/userorders/:userid`, async (req, res) => {
     res.status(500).json({ success: false });
   }
   res.send(userOrderList);
-});
-
-// GET Sales grouped by Day (For Dashboard Chart)
-router.get("/get/salesbyday", async (req, res) => {
-  try {
-    const salesData = await Order.aggregate([
-      {
-        // Group by the date (formatted as YYYY-MM-DD)
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$dateOrdered" } },
-          totalSales: { $sum: "$totalPrice" },
-          ordersCount: { $sum: 1 },
-        },
-      },
-      { $sort: { _id: 1 } }, // Sort by date ascending (oldest to newest)
-      { $limit: 14 }, // Get the last 14 active days
-    ]);
-
-    // Format the data nicely for the frontend chart
-    const formattedData = salesData.map((data) => ({
-      date: data._id,
-      sales: data.totalSales,
-      orders: data.ordersCount,
-    }));
-
-    res.status(200).send(formattedData);
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
 });
 
 module.exports = router;
