@@ -45,6 +45,23 @@ const orderSchema = mongoose.Schema({
         type: Date,
         default: Date.now,
     },
+    // --- NEW FIELDS FOR PHONEPE & COURIER ---
+    paymentStatus: {
+        type: String,
+        default: 'Pending' // Can be: Pending, Paid, Failed
+    },
+    transactionId: {
+        type: String, // PhonePe will give us this
+        default: ''
+    },
+    courierName: {
+        type: String, // e.g., Delhivery, BlueDart, Ekart
+        default: ''
+    },
+    trackingNumber: {
+        type: String, // The AWB number
+        default: ''
+    }
 })
 
 orderSchema.virtual('id').get(function () {

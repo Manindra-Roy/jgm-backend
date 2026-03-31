@@ -31,6 +31,32 @@ router.get(`/:id`, async (req, res) => {
   res.send(order);
 });
 
+// GET: Count of orders grouped by their Status
+router.get('/get/statuscounts', async (req, res) => {
+    try {
+        const statusCounts = await Order.aggregate([
+            {
+                // Group by the 'status' field and add 1 to the count for each document found
+                $group: {
+                    _id: "$status",
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+        // MongoDB returns an array like: [{_id: 'Pending', count: 4}, {_id: 'Delivered', count: 12}]
+        // Let's format this into a clean, easy-to-use object for React
+        const formattedCounts = statusCounts.reduce((acc, curr) => {
+            acc[curr._id] = curr.count;
+            return acc;
+        }, {});
+
+        res.status(200).send(formattedCounts);
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 router.post("/", async (req, res) => {
   const orderItemsIds = Promise.all(
     req.body.orderItems.map(async (orderItem) => {
