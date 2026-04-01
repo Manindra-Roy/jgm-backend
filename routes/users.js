@@ -4,54 +4,50 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
+const { loginSchema, registerSchema, updateUserSchema } = require("../helpers/validator");
 
-// Define the limiter
 const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // Limit each IP to 10 requests per window
-    message: {
-        message:
-            "Too many attempts from this IP, please try again after 15 minutes",
-    },
+    windowMs: 15 * 60 * 1000, 
+    max: 10, 
+    message: { message: "Too many attempts from this IP, please try again after 15 minutes" }
 });
 
 router.get(`/`, async (req, res) => {
-    const userList = await User.find().select("-passwordHash");
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
 
-    if (!userList) {
-        res.status(500).json({ success: false });
+        const userList = await User.find()
+            .select("-passwordHash")
+            .skip(skip)
+            .limit(limit);
+
+        if (!userList) {
+            return res.status(500).json({ success: false });
+        }
+        res.send(userList);
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
-    res.send(userList);
 });
 
-// --- FIX: MUST BE ABOVE THE /:id ROUTE ---
-// GET: Verify Active Admin Session
 router.get("/verify-session", (req, res) => {
-    // Because authJwt() protects the whole API, if a request makes it to this route,
-    // it guarantees the user has a valid, unexpired HttpOnly cookie.
     res.status(200).json({ success: true, message: "Session is valid" });
 });
-// -----------------------------------------
 
 router.get("/:id", async (req, res) => {
     const user = await User.findById(req.params.id).select("-passwordHash");
-
     if (!user) {
-        res
-            .status(500)
-            .json({ message: "The user with the given ID was not found." });
+        res.status(500).json({ message: "The user with the given ID was not found." });
     }
     res.status(200).send(user);
 });
 
-// GET: Verify Active Admin Session
-router.get("/verify-session", (req, res) => {
-    // Because authJwt() protects the whole API, if a request makes it to this route,
-    // it guarantees the user has a valid, unexpired HttpOnly cookie.
-    res.status(200).json({ success: true, message: "Session is valid" });
-});
-
 router.post("/", async (req, res) => {
+    const { error } = registerSchema.validate(req.body);
+    if (error) return res.status(400).send(error.details[0].message);
+
     let user = new User({
         name: req.body.name,
         email: req.body.email,
@@ -67,12 +63,16 @@ router.post("/", async (req, res) => {
     user = await user.save();
 
     if (!user) return res.status(400).send("the user cannot be created!");
-
     res.send(user);
 });
 
 router.put("/:id", async (req, res) => {
+    const { error } = updateUserSchema.validate(req.body);
+    if (error) return res.status(400).send(error.details[0].message);
+
     const userExist = await User.findById(req.params.id);
+    if (!userExist) return res.status(400).send("Invalid User");
+
     let newPassword;
     if (req.body.password) {
         newPassword = bcrypt.hashSync(req.body.password, 10);
@@ -94,16 +94,17 @@ router.put("/:id", async (req, res) => {
             city: req.body.city,
             country: req.body.country,
         },
-        // { new: true}
-        { returnDocument: "after" },
+        { returnDocument: "after" }
     );
 
-    if (!user) return res.status(400).send("the user cannot be created!");
-
+    if (!user) return res.status(400).send("the user cannot be updated!");
     res.send(user);
 });
 
 router.post("/login", authLimiter, async (req, res) => {
+    const { error } = loginSchema.validate(req.body);
+    if (error) return res.status(400).send(error.details[0].message);
+
     const user = await User.findOne({ email: req.body.email });
     const secret = process.env.secret;
 
@@ -114,25 +115,20 @@ router.post("/login", authLimiter, async (req, res) => {
             expiresIn: "1d",
         });
 
-        // Attach token as an HttpOnly cookie
         res.cookie("jgm_token", token, {
             httpOnly: true,
-            secure: false, // Keep false for localhost HTTP
-            sameSite: "lax", // Changed from strict to lax for different localhost ports
-            maxAge: 24 * 60 * 60 * 1000, // 1 Day
+            secure: false, 
+            sameSite: "lax", 
+            maxAge: 24 * 60 * 60 * 1000, 
         });
 
-        res
-            .status(200)
-            .send({ message: "Logged in successfully", user: user.email });
+        res.status(200).send({ message: "Logged in successfully", user: user.email });
     } else {
         res.status(400).send("password is wrong!");
     }
 });
 
-// NEW: Logout Route
 router.post("/logout", (req, res) => {
-    // Must match the exact settings we used to create the cookie
     res.clearCookie("jgm_token", {
         httpOnly: true,
         secure: false,
@@ -142,6 +138,9 @@ router.post("/logout", (req, res) => {
 });
 
 router.post("/register", authLimiter, async (req, res) => {
+    const { error } = registerSchema.validate(req.body);
+    if (error) return res.status(400).send(error.details[0].message);
+
     let user = new User({
         name: req.body.name,
         email: req.body.email,
@@ -157,7 +156,6 @@ router.post("/register", authLimiter, async (req, res) => {
     user = await user.save();
 
     if (!user) return res.status(400).send("the user cannot be created!");
-
     res.send(user);
 });
 
@@ -165,13 +163,9 @@ router.delete("/:id", (req, res) => {
     User.findByIdAndDelete(req.params.id)
         .then((user) => {
             if (user) {
-                return res
-                    .status(200)
-                    .json({ success: true, message: "the user is deleted!" });
+                return res.status(200).json({ success: true, message: "the user is deleted!" });
             } else {
-                return res
-                    .status(404)
-                    .json({ success: false, message: "user not found!" });
+                return res.status(404).json({ success: false, message: "user not found!" });
             }
         })
         .catch((err) => {

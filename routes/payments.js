@@ -86,35 +86,43 @@ router.post("/checkout/:orderId", async (req, res) => {
     }
 });
 
-// 2. THE WEBHOOK: PhonePe's servers will secretly hit this URL after the user pays
 router.post("/webhook", async (req, res) => {
     try {
-        // PhonePe sends the response back encoded in Base64
+        const receivedChecksum = req.headers['x-verify'];
         const base64Response = req.body.response;
-        const decodedResponse = Buffer.from(base64Response, "base64").toString(
-            "utf8",
-        );
+
+        // 1. Calculate the expected checksum to verify authenticity
+        const stringToHash = base64Response + SALT_KEY;
+        const expectedChecksum = crypto
+            .createHash("sha256")
+            .update(stringToHash)
+            .digest("hex") + "###" + SALT_INDEX;
+
+        // 2. Reject if the signatures do not match
+        if (receivedChecksum !== expectedChecksum) {
+            console.error("Invalid Webhook Checksum!");
+            return res.status(400).send("Invalid Checksum");
+        }
+
+        // 3. Process the safe payload
+        const decodedResponse = Buffer.from(base64Response, "base64").toString("utf8");
         const responseData = JSON.parse(decodedResponse);
 
         const merchantTransactionId = responseData.data.merchantTransactionId;
-        const bankTransactionId = responseData.data.transactionId; // PhonePe's official bank ID
+        const bankTransactionId = responseData.data.transactionId; 
         const status = responseData.code;
 
-        // Find the specific order waiting for this payment
         const order = await Order.findOne({ transactionId: merchantTransactionId });
         if (!order) return res.status(404).send("Order not found");
 
-        // Update the payment status in our database
         if (status === "PAYMENT_SUCCESS") {
             order.paymentStatus = "Paid";
-            order.transactionId = bankTransactionId; // Overwrite our temp ID with the official Bank Receipt ID
+            order.transactionId = bankTransactionId; 
         } else {
             order.paymentStatus = "Failed";
         }
 
         await order.save();
-
-        // You MUST return a 200 OK, otherwise PhonePe will keep spamming this route for 24 hours
         res.status(200).send("OK");
     } catch (error) {
         console.error("Webhook Error:", error);

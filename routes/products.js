@@ -1,4 +1,3 @@
-// routes/products.js
 const { Product } = require("../models/product");
 const express = require("express");
 const { Category } = require("../models/category");
@@ -7,15 +6,14 @@ const mongoose = require("mongoose");
 const multer = require("multer");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const cloudinary = require("cloudinary").v2;
+const { productSchema } = require("../helpers/validator");
 
-// Configure Cloudinary
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Cloudinary Storage Setup
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
@@ -24,25 +22,20 @@ const storage = new CloudinaryStorage({
     },
 });
 
-// Add file size limit (5MB)
 const uploadOptions = multer({
     storage: storage,
     limits: { fileSize: 5 * 1024 * 1024 },
 });
 
-// GET Products with Pagination
 router.get(`/`, async (req, res) => {
     let filter = {};
     if (req.query.categories) {
         filter = { category: req.query.categories.split(",") };
     }
-
-    // NEW: Search Filter (Case-insensitive regex search on the product name)
     if (req.query.search) {
         filter.name = { $regex: req.query.search, $options: "i" };
     }
 
-    // Pagination logic
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -56,7 +49,6 @@ router.get(`/`, async (req, res) => {
     res.send(productList);
 });
 
-// GET Single Product
 router.get(`/:id`, async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
         return res.status(400).send("Invalid Product Id");
@@ -66,8 +58,10 @@ router.get(`/:id`, async (req, res) => {
     res.send(product);
 });
 
-// POST Product (Upload to Cloudinary)
 router.post(`/`, uploadOptions.single("image"), async (req, res) => {
+    const { error } = productSchema.validate(req.body);
+    if (error) return res.status(400).send(error.details[0].message);
+
     const category = await Category.findById(req.body.category);
     if (!category) return res.status(400).send("Invalid Category");
 
@@ -78,7 +72,7 @@ router.post(`/`, uploadOptions.single("image"), async (req, res) => {
         name: req.body.name,
         description: req.body.description,
         richDescription: req.body.richDescription,
-        image: req.file.path, // Direct Cloudinary URL
+        image: req.file.path, 
         brand: req.body.brand,
         price: req.body.price,
         category: req.body.category,
@@ -93,11 +87,13 @@ router.post(`/`, uploadOptions.single("image"), async (req, res) => {
     res.send(product);
 });
 
-// PUT Product (Update existing product, handle optional image change)
 router.put("/:id", uploadOptions.single("image"), async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
         return res.status(400).send("Invalid Product Id");
     }
+
+    const { error } = productSchema.validate(req.body);
+    if (error) return res.status(400).send(error.details[0].message);
 
     const category = await Category.findById(req.body.category);
     if (!category) return res.status(400).send("Invalid Category");
@@ -108,10 +104,20 @@ router.put("/:id", uploadOptions.single("image"), async (req, res) => {
     const file = req.file;
     let imagepath;
 
-    // If a new file was uploaded, use the new Cloudinary path
-    // Otherwise, keep the old image path that is already in the database
     if (file) {
         imagepath = file.path;
+        
+        // Delete the old image from Cloudinary
+        if (product.image) {
+            const urlParts = product.image.split('/');
+            const filename = urlParts[urlParts.length - 1];
+            const publicId = `jgm-products/${filename.split('.')[0]}`;
+            try {
+                await cloudinary.uploader.destroy(publicId);
+            } catch (err) {
+                console.error("Failed to delete old image from Cloudinary:", err);
+            }
+        }
     } else {
         imagepath = product.image;
     }
@@ -131,32 +137,39 @@ router.put("/:id", uploadOptions.single("image"), async (req, res) => {
             numReviews: req.body.numReviews,
             isFeatured: req.body.isFeatured,
         },
-        // { new: true } // returns the newly updated data
         { returnDocument: "after" },
     );
 
-    if (!updatedProduct)
-        return res.status(500).send("the product cannot be updated!");
+    if (!updatedProduct) return res.status(500).send("the product cannot be updated!");
     res.send(updatedProduct);
 });
 
-// DELETE Product
 router.delete("/:id", async (req, res) => {
     try {
-        const product = await Product.findByIdAndDelete(req.params.id);
-        if (product) {
-            return res.status(200).json({ success: true, message: "Item deleted!" });
-        } else {
-            return res
-                .status(404)
-                .json({ success: false, message: "Item not found!" });
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ success: false, message: "Item not found!" });
         }
+
+        // Delete image from Cloudinary
+        if (product.image) {
+            const urlParts = product.image.split('/');
+            const filename = urlParts[urlParts.length - 1];
+            const publicId = `jgm-products/${filename.split('.')[0]}`;
+            try {
+                await cloudinary.uploader.destroy(publicId);
+            } catch (err) {
+                console.error("Failed to delete image from Cloudinary:", err);
+            }
+        }
+
+        await Product.findByIdAndDelete(req.params.id);
+        return res.status(200).json({ success: true, message: "Item deleted!" });
     } catch (err) {
         return res.status(500).json({ success: false, error: err });
     }
 });
 
-// GET Product Count (Useful for your dashboard)
 router.get(`/get/count`, async (req, res) => {
     try {
         const productCount = await Product.countDocuments();

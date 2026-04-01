@@ -59,7 +59,6 @@ router.post('/', uploadOptions.single('image'), async (req, res) => {
     res.send(category);
 });
 
-// PUT: Update Category with optional Image
 router.put('/:id', uploadOptions.single('image'), async (req, res) => {
     const categoryExists = await Category.findById(req.params.id);
     if (!categoryExists) return res.status(400).send('Invalid Category!');
@@ -69,6 +68,21 @@ router.put('/:id', uploadOptions.single('image'), async (req, res) => {
 
     if (file) {
         imagepath = file.path; // New image uploaded
+        
+        // --- NEW: Delete the old image from Cloudinary ---
+        if (categoryExists.image) {
+            const urlParts = categoryExists.image.split('/');
+            const filename = urlParts[urlParts.length - 1];
+            const publicId = `jgm-categories/${filename.split('.')[0]}`; // Match category folder
+            
+            try {
+                await cloudinary.uploader.destroy(publicId);
+            } catch (err) {
+                console.error("Failed to delete old category image:", err);
+            }
+        }
+        // -------------------------------------------------
+        
     } else {
         imagepath = categoryExists.image; // Keep the old image
     }
@@ -88,16 +102,36 @@ router.put('/:id', uploadOptions.single('image'), async (req, res) => {
     res.send(category);
 });
 
-router.delete('/:id', (req, res) => {
-    Category.findByIdAndDelete(req.params.id).then(category => {
-        if (category) {
-            return res.status(200).json({ success: true, message: 'The category is deleted!' });
-        } else {
+router.delete('/:id', async (req, res) => {
+    try {
+        const category = await Category.findById(req.params.id);
+        
+        if (!category) {
             return res.status(404).json({ success: false, message: "Category not found!" });
         }
-    }).catch(err => {
-        return res.status(500).json({ success: false, error: err });
-    });
+
+        // Delete image from Cloudinary
+        if (category.image) {
+            const urlParts = category.image.split('/');
+            const filename = urlParts[urlParts.length - 1];
+            const publicId = `jgm-categories/${filename.split('.')[0]}`;
+            
+            try {
+                await cloudinary.uploader.destroy(publicId);
+            } catch (err) {
+                console.error("Failed to delete category image:", err);
+            }
+        }
+
+        // Delete from Database
+        await Category.findByIdAndDelete(req.params.id);
+        
+        return res.status(200).json({ success: true, message: 'The category and image are deleted!' });
+        
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
 });
+
 
 module.exports = router;
