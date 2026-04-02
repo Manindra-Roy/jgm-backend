@@ -35,7 +35,7 @@ router.post("/checkout/:orderId", async (req, res) => {
             amount: amountInPaise,
             redirectUrl: `http://localhost:5173/payment-success/${order._id}`, // Where the user goes after paying
             redirectMode: "REDIRECT",
-            callbackUrl: `https://purple-women-argue.loca.lt/api/v1/payments/webhook`, // Server-to-server hidden webhook
+            callbackUrl: process.env.PHONEPE_WEBHOOK_URL || `https://purple-women-argue.loca.lt/api/v1/payments/webhook`,
             paymentInstrument: {
                 type: "PAY_PAGE",
             },

@@ -24,7 +24,8 @@ function authJwt() {
             { url: /\/api\/v1\/payments\/checkout(.*)/, methods: ["POST"] },
             `${api}/users/login`,
             `${api}/users/register`,
-            `${api}/users/logout` // Add logout to unprotected paths
+            `${api}/users/logout`,
+            `${api}/users/verify-email`
         ],
     });
 }

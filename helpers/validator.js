@@ -1,10 +1,28 @@
 const Joi = require('joi');
+const phoneRegex = /^\+?[0-9]{10,15}$/;
+
+// const registerSchema = Joi.object({
+//     name: Joi.string().min(3).max(50).required(),
+//     email: Joi.string().email().required(),
+//     password: Joi.string().min(6).required(),
+//     phone: Joi.string().min(10).max(15).required(),
+//     isAdmin: Joi.boolean(),
+//     street: Joi.string().allow(''),
+//     apartment: Joi.string().allow(''),
+//     zip: Joi.string().allow(''),
+//     city: Joi.string().allow(''),
+//     country: Joi.string().allow('')
+// });
 
 const registerSchema = Joi.object({
     name: Joi.string().min(3).max(50).required(),
-    email: Joi.string().email().required(),
+    // Enforce stricter email rules (must have a valid domain like .com, .in, .org)
+    email: Joi.string().email({ minDomainSegments: 2, tlds: { allow: ['com', 'net', 'in', 'org', 'co'] } }).required(),
     password: Joi.string().min(6).required(),
-    phone: Joi.string().min(10).max(15).required(),
+    // Apply the phone regex
+    phone: Joi.string().pattern(phoneRegex).required().messages({
+        'string.pattern.base': 'Phone number must be between 10 to 15 digits and can only contain numbers and a leading +.'
+    }),
     isAdmin: Joi.boolean(),
     street: Joi.string().allow(''),
     apartment: Joi.string().allow(''),
@@ -13,11 +31,26 @@ const registerSchema = Joi.object({
     country: Joi.string().allow('')
 });
 
+// const updateUserSchema = Joi.object({
+//     name: Joi.string().min(3).max(50).required(),
+//     email: Joi.string().email().required(),
+//     password: Joi.string().min(6).allow(''), // Optional when updating
+//     phone: Joi.string().min(10).max(15).required(),
+//     isAdmin: Joi.boolean(),
+//     street: Joi.string().allow(''),
+//     apartment: Joi.string().allow(''),
+//     zip: Joi.string().allow(''),
+//     city: Joi.string().allow(''),
+//     country: Joi.string().allow('')
+// });
+
 const updateUserSchema = Joi.object({
     name: Joi.string().min(3).max(50).required(),
-    email: Joi.string().email().required(),
-    password: Joi.string().min(6).allow(''), // Optional when updating
-    phone: Joi.string().min(10).max(15).required(),
+    email: Joi.string().email({ minDomainSegments: 2, tlds: { allow: ['com', 'net', 'in', 'org', 'co'] } }).required(),
+    password: Joi.string().min(6).allow(''), 
+    phone: Joi.string().pattern(phoneRegex).required().messages({
+        'string.pattern.base': 'Phone number must be between 10 to 15 digits and can only contain numbers and a leading +.'
+    }),
     isAdmin: Joi.boolean(),
     street: Joi.string().allow(''),
     apartment: Joi.string().allow(''),

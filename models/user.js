@@ -40,6 +40,16 @@ const userSchema = new mongoose.Schema({
     country: {
         type: String,
         default: ''
+    },
+    isEmailVerified: {
+        type: Boolean,
+        default: false, // Users are unverified by default
+    },
+    otp: {
+        type: String, // Store the 6-digit code
+    },
+    otpExpires: {
+        type: Date, // Store when the code expires (e.g., 10 mins)
     }
 
 });
