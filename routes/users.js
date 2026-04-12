@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
 const { loginSchema, registerSchema, updateUserSchema } = require("../helpers/validator");
 const { sendOtpEmail } = require("../helpers/mailer");
+const nodemailer = require('nodemailer');
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
@@ -37,12 +38,67 @@ router.get("/verify-session", (req, res) => {
     res.status(200).json({ success: true, message: "Session is valid" });
 });
 
+// Get current logged-in user profile
+router.get("/me/profile", async (req, res) => {
+    try {
+        // express-jwt automatically decodes the cookie and puts the payload in req.auth
+        if (!req.auth || !req.auth.userId) {
+            return res.status(401).send("Not authenticated");
+        }
+        
+        // Fetch user but hide sensitive fields
+        const user = await User.findById(req.auth.userId).select("-passwordHash -otp -otpExpires");
+        if (!user) return res.status(404).send("User not found");
+        
+        res.status(200).send(user);
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 router.get("/:id", async (req, res) => {
     const user = await User.findById(req.params.id).select("-passwordHash");
     if (!user) {
         res.status(500).json({ message: "The user with the given ID was not found." });
     }
     res.status(200).send(user);
+});
+
+// POST: Contact Us Form
+router.post('/contact', async (req, res) => {
+    const { name, email, subject, message } = req.body;
+
+    try {
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS 
+            }
+        });
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: process.env.EMAIL_USER, // Sends to your own admin inbox
+            replyTo: email, // If you click "reply", it goes to the customer
+            subject: `JGM Contact Form: ${subject}`,
+            html: `
+                <h3>New Message from JGM Industries Contact Form</h3>
+                <p><strong>Name:</strong> ${name}</p>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Subject:</strong> ${subject}</p>
+                <hr/>
+                <p><strong>Message:</strong></p>
+                <p>${message}</p>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ success: true, message: "Message sent successfully!" });
+    } catch (error) {
+        console.error('Contact Form Error:', error);
+        res.status(500).json({ success: false, message: "Failed to send message." });
+    }
 });
 
 // Admin Route: Create User directly
@@ -132,6 +188,7 @@ router.post("/login", authLimiter, async (req, res) => {
         });
 
         res.status(200).send({ message: "Logged in successfully", user: user.email });
+        // res.status(200).send({ message: "Logged in successfully", user: user.email, userId: user.id });
     } else {
         res.status(400).send("password is wrong!");
     }
@@ -224,6 +281,63 @@ router.get(`/get/count`, async (req, res) => {
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// ==========================================
+// FORGOT PASSWORD: Send OTP
+// ==========================================
+router.post("/forgot-password", authLimiter, async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).send("Email is required");
+
+    const user = await User.findOne({ email: email });
+    if (!user) return res.status(400).send("User with this email does not exist.");
+
+    // Generate a 6-digit OTP and expiration time (10 mins from now)
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
+
+    user.otp = otpCode;
+    user.otpExpires = expiryTime;
+    await user.save();
+
+    try {
+        await sendOtpEmail(user.email, otpCode);
+        res.status(200).send({ message: "Password reset OTP sent to your email." });
+    } catch (emailError) {
+        console.error("Failed to send OTP email:", emailError);
+        res.status(500).send("Failed to send email. Please try again later.");
+    }
+});
+
+// ==========================================
+// RESET PASSWORD: Verify OTP & Change Password
+// ==========================================
+router.post("/reset-password", async (req, res) => {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+        return res.status(400).send("All fields are required.");
+    }
+
+    const user = await User.findOne({ email: email });
+    if (!user) return res.status(400).send("User not found.");
+
+    // Check if OTP matches and is not expired
+    if (user.otp !== otp) {
+        return res.status(400).send("Invalid OTP code.");
+    }
+    if (user.otpExpires < Date.now()) {
+        return res.status(400).send("OTP has expired. Please request a new one.");
+    }
+
+    // Hash new password and clear OTP fields
+    user.passwordHash = bcrypt.hashSync(newPassword, 10);
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+    res.status(200).send({ message: "Password reset successfully! You can now log in." });
 });
 
 module.exports = router;

@@ -1,3 +1,4 @@
+
 const { expressjwt: expressJwt } = require("express-jwt");
 
 function authJwt() {
@@ -7,7 +8,6 @@ function authJwt() {
         secret,
         algorithms: ["HS256"],
         isRevoked: isRevoked,
-        // NEW: Tell it to extract the token from the cookie!
         getToken: function (req) {
             if (req.cookies && req.cookies.jgm_token) {
                 return req.cookies.jgm_token;
@@ -25,15 +25,28 @@ function authJwt() {
             `${api}/users/login`,
             `${api}/users/register`,
             `${api}/users/logout`,
-            `${api}/users/verify-email`
+            `${api}/users/verify-email`,
+            `${api}/users/contact`,
+            `${api}/users/forgot-password`,
+            `${api}/users/reset-password`
+
         ],
     });
 }
 
 async function isRevoked(req, token) {
-    if (!token.payload.isAdmin) {
-        return true; 
+    const path = req.originalUrl || req.url;
+
+    // 1. ALLOW normal customers to fetch their own profile and order history
+    if (path.includes('/users/me/profile') || path.includes('/orders/get/userorders')) {
+        return false; // Do not revoke
     }
+
+    // 2. BLOCK normal customers from all other protected routes (Admin Panel routes)
+    if (!token.payload.isAdmin) {
+        return true; // Revoke!
+    }
+    
     return false; 
 }
 

@@ -104,54 +104,6 @@ router.get("/get/dashboard-stats", async (req, res) => {
     }
 });
 
-// router.post("/", async (req, res) => {
-//     const { error } = orderSchema.validate(req.body);
-//     if (error) return res.status(400).send(error.details[0].message);
-
-//     try {
-//         let calculatedTotalPrice = 0;
-        
-//         // Calculate total and check stock availability
-//         for (const item of req.body.orderItems) {
-//             const product = await Product.findById(item.product).select("price countInStock name");
-//             if (!product) return res.status(400).send(`Product not found: ${item.product}`);
-            
-//             if (product.countInStock < item.quantity) {
-//                 return res.status(400).send(`Insufficient stock for product: ${product.name}`);
-//             }
-            
-//             calculatedTotalPrice += product.price * item.quantity;
-//         }
-
-//         let order = new Order({
-//             orderItems: req.body.orderItems, // Embedded array
-//             shippingAddress1: req.body.shippingAddress1,
-//             shippingAddress2: req.body.shippingAddress2,
-//             city: req.body.city,
-//             zip: req.body.zip,
-//             country: req.body.country,
-//             phone: req.body.phone,
-//             status: req.body.status,
-//             totalPrice: calculatedTotalPrice,
-//             user: req.body.user,
-//         });
-
-//         order = await order.save();
-//         if (!order) return res.status(400).send("the order cannot be created!");
-
-//         // Decrease stock inventory
-//         for (const item of order.orderItems) {
-//             await Product.findByIdAndUpdate(item.product, {
-//                 $inc: { countInStock: -item.quantity } 
-//             });
-//         }
-
-//         res.send(order);
-//     } catch (err) {
-//         res.status(500).send(err.message);
-//     }
-// });
-
 router.post("/", async (req, res) => {
     const { error } = orderSchema.validate(req.body);
     if (error) return res.status(400).send(error.details[0].message);
@@ -212,47 +164,6 @@ router.post("/", async (req, res) => {
     }
 });
 
-// router.put("/:id", async (req, res) => {
-//     const order = await Order.findByIdAndUpdate(
-//         req.params.id,
-//         {
-//             status: req.body.status,
-//             courierName: req.body.courierName,
-//             trackingNumber: req.body.trackingNumber
-//         },
-//         { returnDocument: "after" },
-//     );
-
-//     if (!order) return res.status(400).send("the order cannot be update!");
-//     res.send(order);
-// });
-
-// router.delete("/:id", async (req, res) => {
-//     try {
-//         const order = await Order.findById(req.params.id);
-
-//         if (!order) {
-//             return res.status(404).json({ success: false, message: "Order not found!" });
-//         }
-
-//         // Restore the product stock based on the embedded items
-//         for (const item of order.orderItems) {
-//             await Product.findByIdAndUpdate(item.product, {
-//                 $inc: { countInStock: item.quantity }
-//             });
-//         }
-
-//         await Order.findByIdAndDelete(req.params.id);
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "The order was deleted and stock was restored!",
-//         });
-//     } catch (err) {
-//         return res.status(500).json({ success: false, error: err.message });
-//     }
-// });
-
 // PUT: Update Order (Handle Cancellations)
 
 router.put("/:id", async (req, res) => {
@@ -286,35 +197,6 @@ router.put("/:id", async (req, res) => {
         res.status(500).send(err.message);
     }
 });
-
-// // DELETE: Delete Order
-// router.delete("/:id", async (req, res) => {
-//     try {
-//         const order = await Order.findById(req.params.id);
-
-//         if (!order) {
-//             return res.status(404).json({ success: false, message: "Order not found!" });
-//         }
-
-//         // LOGIC: Only restore stock if the order wasn't already marked as Cancelled
-//         if (order.status !== 'Cancelled') {
-//             for (const item of order.orderItems) {
-//                 await Product.findByIdAndUpdate(item.product, {
-//                     $inc: { countInStock: item.quantity }
-//                 });
-//             }
-//         }
-
-//         await Order.findByIdAndDelete(req.params.id);
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "The order was deleted and inventory synchronized!",
-//         });
-//     } catch (err) {
-//         return res.status(500).json({ success: false, error: err.message });
-//     }
-// });
 
 // DELETE: Delete Order
 router.delete("/:id", async (req, res) => {
