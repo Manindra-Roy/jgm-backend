@@ -1,14 +1,25 @@
+/**
+ * @fileoverview Email Service Helper.
+ * Configures Nodemailer to dispatch transactional emails (e.g., OTPs) securely.
+ */
+
 const nodemailer = require('nodemailer');
 
-// Configure the email transporter
+// Configure the SMTP transporter using environment variables
 const transporter = nodemailer.createTransport({
-    service: 'gmail', // You can use 'gmail', 'sendgrid', 'mailgun', etc.
+    service: 'gmail', 
     auth: {
-        user: process.env.EMAIL_USER, // e.g., your-store@gmail.com
-        pass: process.env.EMAIL_PASS  // e.g., your Gmail App Password
+        user: process.env.EMAIL_USER, 
+        pass: process.env.EMAIL_PASS  // Requires a Google App Password, not a standard login password
     }
 });
 
+/**
+ * Dispatches an HTML-formatted email containing a 6-digit OTP code.
+ * @param {string} userEmail - The recipient's email address.
+ * @param {string} otpCode - The 6-digit security code.
+ * @returns {Promise<any>} A promise that resolves when the email is sent.
+ */
 const sendOtpEmail = async (userEmail, otpCode) => {
     const mailOptions = {
         from: `"JGM Industries" <${process.env.EMAIL_USER}>`,

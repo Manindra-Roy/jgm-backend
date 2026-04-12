@@ -1,23 +1,28 @@
+/**
+ * @fileoverview Order Database Model.
+ * Defines the schema for customer checkouts. Uses an embedded sub-schema 
+ * for order items to ensure items remain tightly coupled to the parent order.
+ */
+
 const mongoose = require('mongoose');
 
-// 1. Define the embedded Order Item Schema first
+// --- 1. EMBEDDED SUB-SCHEMA: Order Items ---
+// _id: false prevents MongoDB from creating redundant ObjectIds for these subdocuments
 const orderItemSchema = mongoose.Schema({
-    quantity: {
-        type: Number,
-        required: true
-    },
+    quantity: { type: Number, required: true },
     product: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Product',
         required: true
     }
-}, { _id: false }); // _id: false prevents Mongo from creating separate ObjectIds for these subdocuments
+}, { _id: false }); 
 
-// 2. Define the main Order Schema
+// --- 2. MAIN SCHEMA: The Order ---
 const orderSchema = mongoose.Schema({
-    // Embed the items directly instead of referencing them
+    // Embed the items directly instead of referencing external documents
     orderItems: [orderItemSchema], 
     
+    // Logistics
     shippingAddress1: { type: String, required: true },
     shippingAddress2: { type: String },
     city: { type: String, required: true },
@@ -25,17 +30,20 @@ const orderSchema = mongoose.Schema({
     country: { type: String, required: true },
     phone: { type: String, required: true },
     status: { type: String, required: true, default: 'Pending' },
+    
+    // Financials & Ownership
     totalPrice: { type: Number },
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     dateOrdered: { type: Date, default: Date.now },
     
-    // Payments & Logistics
+    // Gateway Payments & Tracking
     paymentStatus: { type: String, default: 'Pending' },
     transactionId: { type: String, default: '' },
     courierName: { type: String, default: '' },
     trackingNumber: { type: String, default: '' }
 });
 
+// --- VIRTUAL ID MAPPING ---
 orderSchema.virtual('id').get(function () {
     return this._id.toHexString();
 });

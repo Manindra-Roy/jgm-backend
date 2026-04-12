@@ -1,4 +1,9 @@
-// routes/categories.js
+/**
+ * @fileoverview Category Management Routes.
+ * Handles CRUD operations for product categories, including Cloudinary 
+ * image uploads and safe image deletion (Garbage Collection).
+ */
+
 const { Category } = require('../models/category');
 const express = require('express');
 const router = express.Router();
@@ -6,7 +11,7 @@ const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('cloudinary').v2;
 
-// --- Cloudinary Configuration ---
+// --- CLOUDINARY & MULTER CONFIGURATION ---
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -16,35 +21,56 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
-        folder: 'jgm-categories', // Saves to a specific folder in Cloudinary
+        folder: 'jgm-categories', // Isolates category images in their own Cloudinary folder
         allowedFormats: ['jpeg', 'png', 'jpg'],
     },
 });
 
 const uploadOptions = multer({
     storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 }
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB max file size
 });
-// --------------------------------
 
+/* =========================================================
+   1. CATEGORY RETRIEVAL
+========================================================= */
+
+/**
+ * @route   GET /api/v1/categories/
+ * @desc    Get a list of all product categories.
+ * @access  Public
+ */
 router.get(`/`, async (req, res) => {
     const categoryList = await Category.find();
     if (!categoryList) return res.status(500).json({ success: false });
     res.status(200).send(categoryList);
 });
 
+/**
+ * @route   GET /api/v1/categories/:id
+ * @desc    Get details of a specific category by ID.
+ * @access  Public
+ */
 router.get('/:id', async (req, res) => {
     const category = await Category.findById(req.params.id);
     if (!category) return res.status(500).json({ message: 'The category with the given ID was not found.' });
     res.status(200).send(category);
 });
 
-// POST: Create Category with Image
+/* =========================================================
+   2. ADMIN CATEGORY MANAGEMENT (CRUD)
+========================================================= */
+
+/**
+ * @route   POST /api/v1/categories/
+ * @desc    Create a new category and upload its cover image to Cloudinary.
+ * @access  Admin
+ */
 router.post('/', uploadOptions.single('image'), async (req, res) => {
     const file = req.file;
     let imagepath = '';
     if (file) {
-        imagepath = file.path; // Cloudinary URL
+        imagepath = file.path; // Secure Cloudinary URL
     }
 
     let category = new Category({
@@ -59,6 +85,11 @@ router.post('/', uploadOptions.single('image'), async (req, res) => {
     res.send(category);
 });
 
+/**
+ * @route   PUT /api/v1/categories/:id
+ * @desc    Update a category. Automatically deletes the old Cloudinary image if replaced.
+ * @access  Admin
+ */
 router.put('/:id', uploadOptions.single('image'), async (req, res) => {
     const categoryExists = await Category.findById(req.params.id);
     if (!categoryExists) return res.status(400).send('Invalid Category!');
@@ -67,13 +98,14 @@ router.put('/:id', uploadOptions.single('image'), async (req, res) => {
     let imagepath;
 
     if (file) {
-        imagepath = file.path; // New image uploaded
+        imagepath = file.path; // Use the new uploaded image
         
-        // --- NEW: Delete the old image from Cloudinary ---
+        // --- CLOUDINARY GARBAGE COLLECTION ---
+        // Prevents old category images from permanently taking up storage space
         if (categoryExists.image) {
             const urlParts = categoryExists.image.split('/');
             const filename = urlParts[urlParts.length - 1];
-            const publicId = `jgm-categories/${filename.split('.')[0]}`; // Match category folder
+            const publicId = `jgm-categories/${filename.split('.')[0]}`; 
             
             try {
                 await cloudinary.uploader.destroy(publicId);
@@ -81,10 +113,8 @@ router.put('/:id', uploadOptions.single('image'), async (req, res) => {
                 console.error("Failed to delete old category image:", err);
             }
         }
-        // -------------------------------------------------
-        
     } else {
-        imagepath = categoryExists.image; // Keep the old image
+        imagepath = categoryExists.image; // Retain the existing image if no new file is provided
     }
 
     const category = await Category.findByIdAndUpdate(
@@ -102,6 +132,11 @@ router.put('/:id', uploadOptions.single('image'), async (req, res) => {
     res.send(category);
 });
 
+/**
+ * @route   DELETE /api/v1/categories/:id
+ * @desc    Delete a category and permanently remove its image from Cloudinary.
+ * @access  Admin
+ */
 router.delete('/:id', async (req, res) => {
     try {
         const category = await Category.findById(req.params.id);
@@ -110,7 +145,7 @@ router.delete('/:id', async (req, res) => {
             return res.status(404).json({ success: false, message: "Category not found!" });
         }
 
-        // Delete image from Cloudinary
+        // --- CLOUDINARY GARBAGE COLLECTION ---
         if (category.image) {
             const urlParts = category.image.split('/');
             const filename = urlParts[urlParts.length - 1];
@@ -123,7 +158,7 @@ router.delete('/:id', async (req, res) => {
             }
         }
 
-        // Delete from Database
+        // Remove from Database
         await Category.findByIdAndDelete(req.params.id);
         
         return res.status(200).json({ success: true, message: 'The category and image are deleted!' });
@@ -132,6 +167,5 @@ router.delete('/:id', async (req, res) => {
         return res.status(500).json({ success: false, error: err.message });
     }
 });
-
 
 module.exports = router;

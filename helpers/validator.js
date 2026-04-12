@@ -1,12 +1,22 @@
+/**
+ * @fileoverview Data Validation Schemas (Joi).
+ * Defines strict validation rules for incoming HTTP requests to ensure data integrity
+ * and prevent malicious payloads from reaching the database.
+ */
+
 const Joi = require('joi');
+
+// Global Regex for international phone numbers (allows leading + and 10-15 digits)
 const phoneRegex = /^\+?[0-9]{10,15}$/;
 
+/**
+ * Schema for new user registration.
+ * Enforces strict email domains and precise phone number formatting.
+ */
 const registerSchema = Joi.object({
     name: Joi.string().min(3).max(50).required(),
-    // Enforce stricter email rules (must have a valid domain like .com, .in, .org)
     email: Joi.string().email({ minDomainSegments: 2, tlds: { allow: ['com', 'net', 'in', 'org', 'co'] } }).required(),
     password: Joi.string().min(6).required(),
-    // Apply the phone regex
     phone: Joi.string().pattern(phoneRegex).required().messages({
         'string.pattern.base': 'Phone number must be between 10 to 15 digits and can only contain numbers and a leading +.'
     }),
@@ -18,6 +28,10 @@ const registerSchema = Joi.object({
     country: Joi.string().allow('')
 });
 
+/**
+ * Schema for updating existing users.
+ * Similar to registration, but password is optional.
+ */
 const updateUserSchema = Joi.object({
     name: Joi.string().min(3).max(50).required(),
     email: Joi.string().email({ minDomainSegments: 2, tlds: { allow: ['com', 'net', 'in', 'org', 'co'] } }).required(),
@@ -33,29 +47,43 @@ const updateUserSchema = Joi.object({
     country: Joi.string().allow('')
 });
 
+/**
+ * Schema for authenticating users.
+ */
 const loginSchema = Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().required()
 });
 
+/**
+ * Schema for creating and updating inventory products.
+ * Enforces numerical constraints on prices, stock counts, and ratings.
+ */
 const productSchema = Joi.object({
     name: Joi.string().required(),
     description: Joi.string().required(),
     richDescription: Joi.string().allow(''),
     brand: Joi.string().allow(''),
     price: Joi.number().min(0).required(),
-    category: Joi.string().hex().length(24).required(),
+    category: Joi.string().hex().length(24).required(), // Ensures a valid 24-character MongoDB ObjectId
     countInStock: Joi.number().min(0).max(255).required(),
     rating: Joi.number().min(0).max(5).allow(''),
     numReviews: Joi.number().min(0).allow(''),
     isFeatured: Joi.boolean()
 });
 
+/**
+ * Schema for individual items within an order array.
+ */
 const orderItemSchema = Joi.object({
     product: Joi.string().hex().length(24).required(),
     quantity: Joi.number().min(1).required()
 });
 
+/**
+ * Schema for processing customer checkout orders.
+ * Validates the entire shopping cart array and strict shipping details.
+ */
 const orderSchema = Joi.object({
     orderItems: Joi.array().items(orderItemSchema).min(1).required(),
     shippingAddress1: Joi.string().required(),
@@ -65,7 +93,7 @@ const orderSchema = Joi.object({
     country: Joi.string().required(),
     phone: Joi.string().required(),
     status: Joi.string().valid('Pending', 'Processing', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'),
-    user: Joi.string().hex().length(24).allow(null)
+    user: Joi.string().hex().length(24).allow(null) // Can be null for guest checkout
 });
 
 module.exports = {

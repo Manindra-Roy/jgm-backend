@@ -1,6 +1,12 @@
+/**
+ * @fileoverview Product Management Routes.
+ * Handles CRUD operations for the store catalog, including complex queries (filtering/pagination),
+ * Multer image uploads, and safe Cloudinary image deletion (Garbage Collection).
+ */
+
 const { Product } = require("../models/product");
-const express = require("express");
 const { Category } = require("../models/category");
+const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 const multer = require("multer");
@@ -8,6 +14,7 @@ const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const cloudinary = require("cloudinary").v2;
 const { productSchema } = require("../helpers/validator");
 
+// --- CLOUDINARY & MULTER CONFIGURATION ---
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -24,14 +31,26 @@ const storage = new CloudinaryStorage({
 
 const uploadOptions = multer({
     storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 },
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max limit per image
 });
 
+/* =========================================================
+   1. PRODUCT RETRIEVAL & FILTERING
+========================================================= */
+
+/**
+ * @route   GET /api/v1/products/
+ * @desc    Get a paginated list of products. Supports category filtering and text search.
+ * @access  Public
+ */
 router.get(`/`, async (req, res) => {
     let filter = {};
+    
+    // Support URL parameters: /api/v1/products?categories=id1,id2
     if (req.query.categories) {
         filter = { category: req.query.categories.split(",") };
     }
+    // Support URL search: /api/v1/products?search=oil
     if (req.query.search) {
         filter.name = { $regex: req.query.search, $options: "i" };
     }
@@ -49,6 +68,11 @@ router.get(`/`, async (req, res) => {
     res.send(productList);
 });
 
+/**
+ * @route   GET /api/v1/products/:id
+ * @desc    Get detailed information for a single product.
+ * @access  Public
+ */
 router.get(`/:id`, async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
         return res.status(400).send("Invalid Product Id");
@@ -58,6 +82,15 @@ router.get(`/:id`, async (req, res) => {
     res.send(product);
 });
 
+/* =========================================================
+   2. ADMIN PRODUCT MANAGEMENT (CRUD)
+========================================================= */
+
+/**
+ * @route   POST /api/v1/products/
+ * @desc    Create a new product and upload its image to Cloudinary.
+ * @access  Admin
+ */
 router.post(`/`, uploadOptions.single("image"), async (req, res) => {
     const { error } = productSchema.validate(req.body);
     if (error) return res.status(400).send(error.details[0].message);
@@ -72,7 +105,7 @@ router.post(`/`, uploadOptions.single("image"), async (req, res) => {
         name: req.body.name,
         description: req.body.description,
         richDescription: req.body.richDescription,
-        image: req.file.path, 
+        image: req.file.path, // Direct Cloudinary secure URL
         brand: req.body.brand,
         price: req.body.price,
         category: req.body.category,
@@ -87,6 +120,11 @@ router.post(`/`, uploadOptions.single("image"), async (req, res) => {
     res.send(product);
 });
 
+/**
+ * @route   PUT /api/v1/products/:id
+ * @desc    Update a product. Automatically deletes the old Cloudinary image if a new one is uploaded.
+ * @access  Admin
+ */
 router.put("/:id", uploadOptions.single("image"), async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
         return res.status(400).send("Invalid Product Id");
@@ -107,7 +145,8 @@ router.put("/:id", uploadOptions.single("image"), async (req, res) => {
     if (file) {
         imagepath = file.path;
         
-        // Delete the old image from Cloudinary
+        // --- CLOUDINARY GARBAGE COLLECTION ---
+        // Prevents orphaned files from consuming storage
         if (product.image) {
             const urlParts = product.image.split('/');
             const filename = urlParts[urlParts.length - 1];
@@ -119,7 +158,7 @@ router.put("/:id", uploadOptions.single("image"), async (req, res) => {
             }
         }
     } else {
-        imagepath = product.image;
+        imagepath = product.image; // Retain existing image
     }
 
     const updatedProduct = await Product.findByIdAndUpdate(
@@ -144,6 +183,11 @@ router.put("/:id", uploadOptions.single("image"), async (req, res) => {
     res.send(updatedProduct);
 });
 
+/**
+ * @route   DELETE /api/v1/products/:id
+ * @desc    Delete a product and its associated Cloudinary image.
+ * @access  Admin
+ */
 router.delete("/:id", async (req, res) => {
     try {
         const product = await Product.findById(req.params.id);
@@ -151,7 +195,7 @@ router.delete("/:id", async (req, res) => {
             return res.status(404).json({ success: false, message: "Item not found!" });
         }
 
-        // Delete image from Cloudinary
+        // --- CLOUDINARY GARBAGE COLLECTION ---
         if (product.image) {
             const urlParts = product.image.split('/');
             const filename = urlParts[urlParts.length - 1];
@@ -170,6 +214,11 @@ router.delete("/:id", async (req, res) => {
     }
 });
 
+/**
+ * @route   GET /api/v1/products/get/count
+ * @desc    Get the total number of products for the Admin Dashboard.
+ * @access  Admin
+ */
 router.get(`/get/count`, async (req, res) => {
     try {
         const productCount = await Product.countDocuments();
