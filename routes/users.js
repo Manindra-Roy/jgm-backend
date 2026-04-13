@@ -110,11 +110,19 @@ router.post("/login", authLimiter, async (req, res) => {
         });
 
         // Set secure HTTP-Only cookie
-        res.cookie("jgm_token", token, {
+        // res.cookie("jgm_token", token, {
+        //     httpOnly: true,
+        //     secure: process.env.NODE_ENV === 'production', // True in production, False on localhost
+        //     sameSite: "lax", 
+        //     maxAge: 24 * 60 * 60 * 1000, 
+        // });
+
+        // Inside your login route (and register route if you log them in automatically)
+        res.cookie('jgm_token', token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production', // True in production, False on localhost
-            sameSite: "lax", 
-            maxAge: 24 * 60 * 60 * 1000, 
+            secure: true,        // CRITICAL: Must be true for cross-domain cookies
+            sameSite: 'none',    // CRITICAL: Allows Vercel to talk to Render
+            maxAge: 30 * 24 * 60 * 60 * 1000 // 30 Days
         });
 
         res.status(200).send({ message: "Logged in successfully", user: user.email });
