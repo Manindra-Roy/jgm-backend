@@ -38,14 +38,9 @@ const api = process.env.API_URL;
  * Only allows traffic from specified frontends to prevent unauthorized API access.
  */
 const allowedOrigins = [
-    'https://jgm-frontend-v1.vercel.app',
-    'https://jgm-admin-panel.vercel.app',
     'https://jgmindustries.in',
     'https://www.jgmindustries.in', 
-    'https://admin.jgmindustries.in', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:5174'
+    'https://admin.jgmindustries.in'
 ];
 
 const corsOptions = {
