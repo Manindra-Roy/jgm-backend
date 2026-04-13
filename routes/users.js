@@ -110,13 +110,6 @@ router.post("/login", authLimiter, async (req, res) => {
         });
 
         // Set secure HTTP-Only cookie
-        // res.cookie("jgm_token", token, {
-        //     httpOnly: true,
-        //     secure: process.env.NODE_ENV === 'production', // True in production, False on localhost
-        //     sameSite: "lax", 
-        //     maxAge: 24 * 60 * 60 * 1000, 
-        // });
-
         // Inside your login route (and register route if you log them in automatically)
         res.cookie('jgm_token', token, {
             httpOnly: true,
@@ -139,8 +132,8 @@ router.post("/login", authLimiter, async (req, res) => {
 router.post("/logout", (req, res) => {
     res.clearCookie("jgm_token", {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: "lax",
+        secure: true,           // CRITICAL: Must match login setting
+        sameSite: "none",       // CRITICAL: Must match login setting (was "lax")
     });
     res.status(200).json({ message: "Logged out successfully" });
 });
