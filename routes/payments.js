@@ -31,17 +31,33 @@ router.post("/checkout/:orderId", async (req, res) => {
         // Generate unique tracking ID: JGM-[last 6 of order ID]-[timestamp]
         const merchantTransactionId = `JGM-${order._id.toString().slice(-6)}-${Date.now()}`;
 
+        // Grab the base URLs from your environment variables, but fall back to localhost for local testing!
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        
+        // You can use a dedicated webhook URL, or just dynamically build it from your live backend URL
+        const backendWebhookUrl = process.env.PHONEPE_WEBHOOK_URL || `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/v1/payments/webhook`;
+
         // Construct base payload
         const payload = {
             merchantId: MERCHANT_ID,
             merchantTransactionId: merchantTransactionId,
             merchantUserId: order.user ? order.user.toString() : "GUEST-USER",
             amount: amountInPaise,
-            redirectUrl: `http://localhost:5173/payment-success/${order._id}`, 
+            redirectUrl: `${frontendUrl}/payment-success/${order._id}`, 
             redirectMode: "REDIRECT",
-            callbackUrl: process.env.PHONEPE_WEBHOOK_URL || `https://vcdoq-1-39-125-254.run.pinggy-free.link/api/v1/payments/webhook`,
+            callbackUrl: backendWebhookUrl, 
             paymentInstrument: { type: "PAY_PAGE" },
         };
+        // const payload = {
+        //     merchantId: MERCHANT_ID,
+        //     merchantTransactionId: merchantTransactionId,
+        //     merchantUserId: order.user ? order.user.toString() : "GUEST-USER",
+        //     amount: amountInPaise,
+        //     redirectUrl: `http://localhost:5173/payment-success/${order._id}`, 
+        //     redirectMode: "REDIRECT",
+        //     callbackUrl: process.env.PHONEPE_WEBHOOK_URL || `https://vcdoq-1-39-125-254.run.pinggy-free.link/api/v1/payments/webhook`,
+        //     paymentInstrument: { type: "PAY_PAGE" },
+        // };
 
         // --- CRYPTOGRAPHIC SIGNATURE GENERATION ---
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
