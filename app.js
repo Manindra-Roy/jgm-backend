@@ -1,10 +1,8 @@
 /**
  * @fileoverview Main application entry point for JGM Industries Backend.
- * Initializes Express, connects to MongoDB, sets up security middleware,
- * configures routes, and establishes a WebSocket server for real-time analytics.
+ * PRODUCTION MODE: Strict CORS, Helmet Security, and Mongoose Sanitization.
  */
 
-// --- 1. CORE & THIRD-PARTY MODULES ---
 const http = require('http'); 
 const express = require('express');
 require('express-async-errors'); 
@@ -17,30 +15,24 @@ const mongoSanitize = require('express-mongo-sanitize');
 const cookieParser = require('cookie-parser');
 require('dotenv/config');
 
-// --- 2. LOCAL HELPERS & MIDDLEWARE ---
 const authJwt = require('./helpers/jwt');
 const errorHandler = require('./helpers/error-handler');
 
-// --- 3. ROUTE IMPORTS ---
 const categoriesRoutes = require('./routes/categories');
 const productsRoutes = require('./routes/products');
 const usersRoutes = require('./routes/users');
 const ordersRoutes = require('./routes/orders');
 const paymentsRoutes = require('./routes/payments');
 
-// --- INITIALIZATION ---
 const app = express();
-const api = process.env.API_URL;
+const api = process.env.API_URL || '/api/v1';
 
-// --- 4. CORS CONFIGURATION ---
-/**
- * Strict Cross-Origin Resource Sharing (CORS) policy.
- * Only allows traffic from specified frontends to prevent unauthorized API access.
- */
+// --- STRICT PRODUCTION CORS ---
 const allowedOrigins = [
     'https://jgmindustries.in',
     'https://www.jgmindustries.in', 
-    'https://admin.jgmindustries.in'
+    'https://admin.jgmindustries.in',
+    'https://jgm-frontend-v1.vercel.app' // Fallback Vercel URL
 ];
 
 const corsOptions = {
@@ -51,41 +43,42 @@ const corsOptions = {
         }
         return callback(null, true);
     },
-    credentials: true // Required for HTTP-only cookies
+    credentials: true 
 };
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-// --- 5. SECURITY & PARSING MIDDLEWARE ---
-app.use(helmet());                     // Secures HTTP headers
-app.use(mongoSanitize());              // Prevents NoSQL Injection attacks
-app.use(express.json());               // Parses incoming JSON payloads
-app.use(cookieParser());               // Parses HTTP-only cookies for JWT auth
-app.use(morgan('tiny'));               // Logs HTTP requests
-app.use(authJwt());                    // Verifies JWT tokens (protects routes)
-app.use(errorHandler);                 // Global error handling wrapper
+// --- SECURITY MIDDLEWARE ---
+app.use(helmet());                     
+app.use(mongoSanitize());              
+app.use(express.json());               
+app.use(cookieParser());               
+app.use(morgan('tiny'));               
+app.use(authJwt());                    
+app.use(errorHandler);                 
 
-// --- 6. ROUTE DECLARATIONS ---
+// --- ROUTE DECLARATIONS ---
 app.use(`${api}/categories`, categoriesRoutes);
 app.use(`${api}/products`, productsRoutes);
 app.use(`${api}/users`, usersRoutes);
 app.use(`${api}/orders`, ordersRoutes);
 app.use(`${api}/payments`, paymentsRoutes);
 
-// --- 7. DATABASE CONNECTION ---
+// --- DATABASE CONNECTION ---
 mongoose.connect(process.env.CONNECTION_STRING, {
     dbName: 'jgm-db'
 })
 .then(() => console.log('✅ JGM Database Connection is ready...'))
 .catch((err) => console.error('❌ Database Connection Error:', err));
 
-// --- 8. WEBSOCKET SERVER (REAL-TIME ANALYTICS) ---
+// --- WEBSOCKET SERVER ---
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
         origin: allowedOrigins,
-        methods: ["GET", "POST"]
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
@@ -96,13 +89,13 @@ io.on('connection', (socket) => {
     io.emit('liveUsersUpdate', liveUserCount);
 
     socket.on('disconnect', () => {
-        liveUserCount = Math.max(0, liveUserCount - 1); // Ensures count never drops below 0
+        liveUserCount = Math.max(0, liveUserCount - 1); 
         io.emit('liveUsersUpdate', liveUserCount);
     });
 });
 
-// --- 9. SERVER IGNITION ---
+// --- SERVER IGNITION ---
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`🚀 JGM Backend server is running on port ${PORT}`);
+    console.log(`🚀 JGM Backend PRODUCTION server running on port ${PORT}`);
 });
