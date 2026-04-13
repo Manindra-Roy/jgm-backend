@@ -1,11 +1,13 @@
 /**
  * @fileoverview Global Error Handler Middleware.
- * Catches unauthorized JWT tokens, validation errors, and general server faults.
- * Prevents the backend from crashing and returns clean JSON error messages.
+ * PRODUCTION MODE: Masks internal server errors to prevent data leakage.
  */
 
 function errorHandler(err, req, res, next) {
-    // 1. JWT Authentication Error (Invalid or expired token)
+    // 1. Log the real error to your private Render logs
+    console.error("🚨 Internal Server Error:", err);
+
+    // 2. Auth Errors
     if (err.name === 'UnauthorizedError') {
         return res.status(401).json({ 
             success: false, 
@@ -13,7 +15,7 @@ function errorHandler(err, req, res, next) {
         });
     }
 
-    // 2. Mongoose/Joi Validation Error (Bad data submitted)
+    // 3. Validation Errors
     if (err.name === 'ValidationError') {
         return res.status(400).json({ 
             success: false, 
@@ -21,11 +23,15 @@ function errorHandler(err, req, res, next) {
         });
     }
 
-    // 3. Fallback for all other unexpected server errors
-    console.error("🚨 Server Error:", err.message);
+    // 4. Catch-All Server Crash (The Security Mask)
+    const isProduction = process.env.NODE_ENV === 'production';
+    
     return res.status(500).json({ 
         success: false, 
-        error: err.message || "An unexpected error occurred." 
+        // Hide actual crash reasons from users in production
+        message: isProduction ? "An internal server error occurred." : (err.message || "An unexpected error occurred."),
+        // NEVER send the stack trace in production
+        stack: isProduction ? null : err.stack 
     });
 }
 
