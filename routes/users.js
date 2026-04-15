@@ -168,17 +168,8 @@ router.get("/me/profile", async (req, res) => {
 router.post('/contact', async (req, res) => {
     const { name, email, subject, message } = req.body;
     try {
-        // const transporter = nodemailer.createTransport({
-        //     service: 'gmail',
-        //     auth: {
-        //         user: process.env.EMAIL_USER,
-        //         pass: process.env.EMAIL_PASS 
-        //     }
         const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            family: 4,
+            service: 'gmail',
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS 
