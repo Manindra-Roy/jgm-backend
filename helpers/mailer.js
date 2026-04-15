@@ -3,28 +3,14 @@
  * Configures Nodemailer to dispatch transactional emails (e.g., OTPs) securely.
  */
 
-// const nodemailer = require('nodemailer');
-
-// // Configure the SMTP transporter using environment variables
-// const transporter = nodemailer.createTransport({
-//     service: 'gmail', 
-//     auth: {
-//         user: process.env.EMAIL_USER, 
-//         pass: process.env.EMAIL_PASS  // Requires a Google App Password, not a standard login password
-//     }
-// });
-
 const nodemailer = require('nodemailer');
 
-// Explicitly define host and secure port for production environments
+// Configure the SMTP transporter using environment variables
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true, // CRITICAL: Forces secure SSL connection 
-    family: 4,
+    service: 'gmail', 
     auth: {
         user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS  
+        pass: process.env.EMAIL_PASS  // Requires a Google App Password, not a standard login password
     }
 });
 
