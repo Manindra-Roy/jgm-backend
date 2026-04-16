@@ -38,4 +38,32 @@ const sendOtpEmail = async (userEmail, otpCode) => {
     return transporter.sendMail(mailOptions);
 };
 
-module.exports = { sendOtpEmail };
+/**
+ * Dispatches a contact form message to the admin inbox.
+ * @param {string} name - Sender's name.
+ * @param {string} email - Sender's email (used as replyTo).
+ * @param {string} subject - Message subject.
+ * @param {string} message - Message body.
+ * @returns {Promise<any>} A promise that resolves when the email is sent.
+ */
+const sendContactEmail = async (name, email, subject, message) => {
+    const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: process.env.EMAIL_USER,
+        replyTo: email,
+        subject: `JGM Contact Form: ${subject}`,
+        html: `
+            <h3>New Message from JGM Industries Contact Form</h3>
+            <p><strong>Name:</strong> ${name}</p>
+            <p><strong>Email:</strong> ${email}</p>
+            <p><strong>Subject:</strong> ${subject}</p>
+            <hr/>
+            <p><strong>Message:</strong></p>
+            <p>${message}</p>
+        `
+    };
+
+    return transporter.sendMail(mailOptions);
+};
+
+module.exports = { sendOtpEmail, sendContactEmail };

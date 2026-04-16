@@ -28,8 +28,10 @@ router.get(`/`, async (req, res) => {
             .skip(skip)
             .limit(limit);
 
+        const totalCount = await Order.countDocuments();
+
         if (!orderList) return res.status(500).json({ success: false });
-        res.send(orderList);
+        res.send({ orders: orderList, totalCount, page, limit });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -147,6 +149,11 @@ router.post("/", async (req, res) => {
             calculatedTotalPrice += product.price * item.quantity;
         }
 
+        // SECURITY: Prefer the authenticated user's ID from JWT when available.
+        // Falls back to the client-provided user ID for guest/public checkout routes
+        // where express-jwt is skipped, or null for fully anonymous guests.
+        const userId = (req.auth && req.auth.userId) ? req.auth.userId : (req.body.user || null);
+
         // Step 2: Create the Order
         let order = new Order({
             orderItems: req.body.orderItems,
@@ -156,9 +163,9 @@ router.post("/", async (req, res) => {
             zip: req.body.zip,
             country: req.body.country,
             phone: req.body.phone,
-            status: req.body.status,
+            status: 'Pending', // SECURITY: Always start as Pending, never trust client
             totalPrice: calculatedTotalPrice,
-            user: req.body.user,
+            user: userId,
         });
 
         order = await order.save({ session });

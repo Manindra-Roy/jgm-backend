@@ -9,30 +9,10 @@ const { Category } = require("../models/category");
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
-const multer = require("multer");
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
-const cloudinary = require("cloudinary").v2;
+const { cloudinary, createUploader } = require("../helpers/cloudinary");
 const { productSchema } = require("../helpers/validator");
 
-// --- CLOUDINARY & MULTER CONFIGURATION ---
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-const storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: "jgm-products",
-        allowedFormats: ["jpeg", "png", "jpg"],
-    },
-});
-
-const uploadOptions = multer({
-    storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max limit per image
-});
+const uploadOptions = createUploader("jgm-products");
 
 /* =========================================================
    1. PRODUCT RETRIEVAL & FILTERING
@@ -64,8 +44,10 @@ router.get(`/`, async (req, res) => {
         .skip(skip)
         .limit(limit);
 
+    const totalCount = await Product.countDocuments(filter);
+
     if (!productList) return res.status(500).json({ success: false });
-    res.send(productList);
+    res.send({ products: productList, totalCount, page, limit });
 });
 
 /**

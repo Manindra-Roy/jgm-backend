@@ -32,7 +32,12 @@ const allowedOrigins = [
     'https://jgmindustries.in',
     'https://www.jgmindustries.in', 
     'https://admin.jgmindustries.in',
-    'https://jgm-frontend-v1.vercel.app' // Fallback Vercel URL
+    'https://jgm-frontend-v1.vercel.app', // Fallback Vercel URL
+    'https://jgm-admin-panel.vercel.app', // Fallback Vercel URL
+    'http://localhost:3000', // For local development (remove in production)
+    'http://localhost:5173', // For local development (remove in production)
+    'http://localhost:5174' // For local development (remove in production)
+
 ];
 
 const corsOptions = {
@@ -55,6 +60,12 @@ app.use(mongoSanitize());
 app.use(express.json());               
 app.use(cookieParser());               
 app.use(morgan('tiny'));               
+
+// --- HEALTH CHECK (before auth, so monitoring tools can ping freely) ---
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.use(authJwt());                    
 app.use(errorHandler);                 
 

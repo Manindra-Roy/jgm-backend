@@ -35,6 +35,7 @@ function authJwt() {
             { url: /\/api\/v1\/orders(.*)/, methods: ["GET", "OPTIONS", "POST"] },
             { url: /\/api\/v1\/payments\/webhook(.*)/, methods: ["POST"] },
             { url: /\/api\/v1\/payments\/checkout(.*)/, methods: ["POST"] },
+            { url: /\/api\/v1\/payments\/check-status(.*)/, methods: ["GET"] },
             `${api}/users/login`,
             `${api}/users/register`,
             `${api}/users/logout`,

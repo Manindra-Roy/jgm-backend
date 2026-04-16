@@ -10,8 +10,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
 const { loginSchema, registerSchema, updateUserSchema } = require("../helpers/validator");
-const { sendOtpEmail } = require("../helpers/mailer");
-const nodemailer = require('nodemailer');
+const { sendOtpEmail, sendContactEmail } = require("../helpers/mailer");
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
@@ -23,6 +22,10 @@ router.post("/register", authLimiter, async (req, res) => {
     const { error } = registerSchema.validate(req.body);
     if (error) return res.status(400).send(error.details[0].message);
 
+    // SECURITY: Prevent duplicate registrations
+    const existingUser = await User.findOne({ email: req.body.email });
+    if (existingUser) return res.status(400).send("A user with this email already exists.");
+
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
 
@@ -31,7 +34,7 @@ router.post("/register", authLimiter, async (req, res) => {
         email: req.body.email,
         passwordHash: bcrypt.hashSync(req.body.password, 10),
         phone: req.body.phone,
-        isAdmin: req.body.isAdmin || false,
+        isAdmin: false, // SECURITY: Never trust client input for admin status. Admins are created only via the Admin Panel.
         otp: otpCode,
         otpExpires: expiryTime
     });
@@ -135,6 +138,7 @@ router.post("/reset-password", async (req, res) => {
     const { email, otp, newPassword } = req.body;
 
     if (!email || !otp || !newPassword) return res.status(400).send("All fields are required.");
+    if (newPassword.length < 6) return res.status(400).send("Password must be at least 6 characters long.");
 
     const user = await User.findOne({ email: email });
     if (!user) return res.status(400).send("User not found.");
@@ -168,31 +172,7 @@ router.get("/me/profile", async (req, res) => {
 router.post('/contact', async (req, res) => {
     const { name, email, subject, message } = req.body;
     try {
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS 
-            }
-        });
-
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: process.env.EMAIL_USER, 
-            replyTo: email, 
-            subject: `JGM Contact Form: ${subject}`,
-            html: `
-                <h3>New Message from JGM Industries Contact Form</h3>
-                <p><strong>Name:</strong> ${name}</p>
-                <p><strong>Email:</strong> ${email}</p>
-                <p><strong>Subject:</strong> ${subject}</p>
-                <hr/>
-                <p><strong>Message:</strong></p>
-                <p>${message}</p>
-            `
-        };
-
-        await transporter.sendMail(mailOptions);
+        await sendContactEmail(name, email, subject, message);
         res.status(200).json({ success: true, message: "Message sent successfully!" });
     } catch (error) {
         console.error('Contact Form Error:', error);
@@ -207,9 +187,10 @@ router.get(`/`, async (req, res) => {
         const skip = (page - 1) * limit;
 
         const userList = await User.find().select("-passwordHash").skip(skip).limit(limit);
+        const totalCount = await User.countDocuments();
 
         if (!userList) return res.status(500).json({ success: false });
-        res.send(userList);
+        res.send({ users: userList, totalCount, page, limit });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }

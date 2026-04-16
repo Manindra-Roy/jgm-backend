@@ -11,7 +11,7 @@ const categorySchema = mongoose.Schema({
     icon: { type: String },
     color: { type: String },
     image: { type: String, default: '' } // Cloudinary URL for the category banner
-});
+}, { timestamps: true });
 
 // --- VIRTUAL ID MAPPING ---
 categorySchema.virtual('id').get(function () {

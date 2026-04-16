@@ -24,7 +24,7 @@ const userSchema = new mongoose.Schema({
     isEmailVerified: { type: Boolean, default: false }, // Users are unverified by default
     otp: { type: String }, // Stores the temporary 6-digit code
     otpExpires: { type: Date } // Expiration timestamp for the OTP
-});
+}, { timestamps: true });
 
 // --- VIRTUAL ID MAPPING ---
 // Converts MongoDB's default '_id' object into a clean 'id' string for the React frontend

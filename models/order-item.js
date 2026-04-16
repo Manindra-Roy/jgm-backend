@@ -1,17 +1,7 @@
 /**
- * @fileoverview Standalone Order Item Model (Legacy/Reference).
- * Note: While defined here, best practice (as implemented in order.js) 
- * is to embed this schema directly into the parent Order document.
+ * @fileoverview DEPRECATED - This file is no longer used.
+ * Order items are now embedded directly in the Order schema (see order.js).
+ * This file should be deleted from the project.
  */
 
-const mongoose = require('mongoose');
-
-const orderItemSchema = mongoose.Schema({
-    quantity: { type: Number, required: true },
-    product: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Product'
-    }
-});
-
-exports.OrderItem = mongoose.model('OrderItem', orderItemSchema);
+// This model is intentionally empty. Delete this file.
