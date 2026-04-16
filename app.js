@@ -27,6 +27,8 @@ const paymentsRoutes = require('./routes/payments');
 const app = express();
 const api = process.env.API_URL || '/api/v1';
 
+app.set('trust proxy', 1);
+
 // --- STRICT PRODUCTION CORS ---
 const allowedOrigins = [
     'https://jgmindustries.in',
