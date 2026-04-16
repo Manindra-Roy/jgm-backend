@@ -26,10 +26,7 @@ const transporter = nodemailer.createTransport({
     tls: {
         rejectUnauthorized: false 
     }
-    // Adding timeout values ensures the server doesn't hang indefinitely 
-    connectionTimeout: 10000, 
-    greetingTimeout: 10000,
-    socketTimeout: 10000
+
 });
 
 /**
