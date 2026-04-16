@@ -14,16 +14,22 @@ const nodemailer = require('nodemailer');
 //     }
 // });
 
+
+const dns = require('dns');const dns = require('dns');
+
 // Configure the SMTP transporter explicitly for cloud deployment
 
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
     secure: true, 
-    family: 4, // <-- ADD THIS LINE: Forces Node to use IPv4 instead of IPv6
     auth: {
         user: process.env.EMAIL_USER, 
         pass: process.env.EMAIL_PASS  
+    },
+    // INTERCEPT: Forces Node.js to resolve 'smtp.gmail.com' to an IPv4 address
+    lookup: (hostname, options, callback) => {
+        dns.lookup(hostname, { family: 4 }, callback);
     },
     tls: {
         rejectUnauthorized: false 
