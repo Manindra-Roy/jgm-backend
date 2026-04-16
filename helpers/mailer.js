@@ -15,10 +15,12 @@ const nodemailer = require('nodemailer');
 // });
 
 // Configure the SMTP transporter explicitly for cloud deployment
+
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,               // Force the use of port 465
-    secure: true,            // true for 465, false for other ports
+    port: 465,
+    secure: true, 
+    family: 4, // <-- ADD THIS LINE: Forces Node to use IPv4 instead of IPv6
     auth: {
         user: process.env.EMAIL_USER, 
         pass: process.env.EMAIL_PASS  
@@ -26,9 +28,7 @@ const transporter = nodemailer.createTransport({
     tls: {
         rejectUnauthorized: false 
     }
-
 });
-
 /**
  * Dispatches an HTML-formatted email containing a 6-digit OTP code.
  * @param {string} userEmail - The recipient's email address.
