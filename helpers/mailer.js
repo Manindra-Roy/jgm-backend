@@ -1,6 +1,7 @@
 /**
  * @fileoverview Email Service Helper.
  * Configures Nodemailer to dispatch transactional emails (e.g., OTPs) securely.
+ * Uses explicit SMTP config with timeouts for Railway compatibility.
  */
 
 const nodemailer = require('nodemailer');
@@ -10,19 +11,30 @@ console.log('📧 Email Config Check:');
 console.log('  EMAIL_USER loaded:', !!process.env.EMAIL_USER, process.env.EMAIL_USER ? `(${process.env.EMAIL_USER.substring(0, 3)}***)` : '(MISSING!)');
 console.log('  EMAIL_PASS loaded:', !!process.env.EMAIL_PASS, process.env.EMAIL_PASS ? `(${process.env.EMAIL_PASS.length} chars)` : '(MISSING!)');
 
-// Configure the SMTP transporter using environment variables
+// Configure the SMTP transporter with explicit settings (not 'service' shorthand)
 const transporter = nodemailer.createTransport({
-    service: 'gmail', 
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,  // Use SSL on port 465
     auth: {
         user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS  // Requires a Google App Password, not a standard login password
+        pass: process.env.EMAIL_PASS  // Requires a Google App Password
+    },
+    connectionTimeout: 10000,  // 10 seconds to establish connection
+    greetingTimeout: 10000,    // 10 seconds for SMTP greeting
+    socketTimeout: 15000,      // 15 seconds for socket inactivity
+    tls: {
+        rejectUnauthorized: false  // Accept self-signed certs on cloud platforms
     }
 });
 
 // --- DIAGNOSTIC: Verify SMTP connection on startup ---
 transporter.verify()
-    .then(() => console.log('✅ SMTP connection verified — Gmail is ready to send emails'))
-    .catch((err) => console.error('❌ SMTP connection FAILED:', err.message));
+    .then(() => console.log('✅ SMTP connection verified (port 465 SSL) — Gmail is ready'))
+    .catch((err) => {
+        console.error('❌ SMTP port 465 FAILED:', err.message);
+        console.error('❌ Full error code:', err.code);
+    });
 
 /**
  * Dispatches an HTML-formatted email containing a 6-digit OTP code.
