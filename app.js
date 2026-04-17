@@ -27,6 +27,10 @@ const paymentsRoutes = require('./routes/payments');
 const app = express();
 const api = process.env.API_URL || '/api/v1';
 
+// --- TRUST PROXY (Railway runs behind a reverse proxy) ---
+// Required for express-rate-limit to correctly read client IPs from X-Forwarded-For
+app.set('trust proxy', 1);
+
 // --- STRICT PRODUCTION CORS ---
 const allowedOrigins = [
     'https://jgmindustries.in',

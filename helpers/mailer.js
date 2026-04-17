@@ -24,15 +24,15 @@ if (isProduction) {
 const transportConfig = isProduction
     ? {
         host: 'smtp-relay.brevo.com',
-        port: 2525,
-        secure: false,
+        port: 587,
+        secure: false, // STARTTLS upgrades after connect
         auth: {
             user: process.env.BREVO_USER,  // Your Brevo login email
             pass: process.env.BREVO_PASS   // Your Brevo SMTP key
         },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 30000
     }
     : {
         service: 'gmail',
