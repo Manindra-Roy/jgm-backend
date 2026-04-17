@@ -1,41 +1,61 @@
 /**
  * @fileoverview Email Service Helper.
- * Configures Nodemailer to dispatch transactional emails (e.g., OTPs) securely.
- * Uses explicit SMTP config with timeouts for Railway compatibility.
+ * Uses Brevo (Sendinblue) SMTP relay for production (Railway blocks Gmail SMTP ports).
+ * Falls back to Gmail SMTP for local development.
  */
 
 const nodemailer = require('nodemailer');
 
-// --- DIAGNOSTIC: Check if email credentials are loaded ---
-console.log('📧 Email Config Check:');
-console.log('  EMAIL_USER loaded:', !!process.env.EMAIL_USER, process.env.EMAIL_USER ? `(${process.env.EMAIL_USER.substring(0, 3)}***)` : '(MISSING!)');
-console.log('  EMAIL_PASS loaded:', !!process.env.EMAIL_PASS, process.env.EMAIL_PASS ? `(${process.env.EMAIL_PASS.length} chars)` : '(MISSING!)');
+const isProduction = process.env.NODE_ENV === 'production';
 
-// Configure the SMTP transporter with explicit settings (not 'service' shorthand)
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,  // Use STARTTLS on port 587
-    auth: {
-        user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS  // Requires a Google App Password
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    tls: {
-        rejectUnauthorized: false,
-        ciphers: 'SSLv3'
+// --- DIAGNOSTIC: Check email config ---
+console.log('📧 Email Config:');
+console.log('  Environment:', isProduction ? 'PRODUCTION (Brevo SMTP)' : 'LOCAL (Gmail SMTP)');
+console.log('  EMAIL_USER loaded:', !!process.env.EMAIL_USER);
+console.log('  EMAIL_PASS loaded:', !!process.env.EMAIL_PASS);
+if (isProduction) {
+    console.log('  BREVO_USER loaded:', !!process.env.BREVO_USER);
+    console.log('  BREVO_PASS loaded:', !!process.env.BREVO_PASS);
+}
+
+// --- TRANSPORTER CONFIG ---
+// Production: Brevo SMTP on port 587 (Railway blocks Gmail SMTP ports 465/587)
+// Local Dev:  Gmail SMTP directly
+const transportConfig = isProduction
+    ? {
+        host: 'smtp-relay.brevo.com',
+        port: 587,
+        secure: false,
+        auth: {
+            user: process.env.BREVO_USER,  // Your Brevo login email
+            pass: process.env.BREVO_PASS   // Your Brevo SMTP key
+        },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000
     }
-});
+    : {
+        service: 'gmail',
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
+        }
+    };
+
+const transporter = nodemailer.createTransport(transportConfig);
 
 // --- DIAGNOSTIC: Verify SMTP connection on startup ---
 transporter.verify()
-    .then(() => console.log('✅ SMTP connection verified (port 465 SSL) — Gmail is ready'))
+    .then(() => console.log(`✅ SMTP verified — ${isProduction ? 'Brevo' : 'Gmail'} is ready to send emails`))
     .catch((err) => {
-        console.error('❌ SMTP port 465 FAILED:', err.message);
-        console.error('❌ Full error code:', err.code);
+        console.error('❌ SMTP verification FAILED:', err.message);
+        console.error('❌ Error code:', err.code);
     });
+
+// The "from" address: In production use the verified Brevo sender, locally use Gmail
+const getFromAddress = () => {
+    return process.env.BREVO_SENDER || process.env.EMAIL_USER;
+};
 
 /**
  * Dispatches an HTML-formatted email containing a 6-digit OTP code.
@@ -45,7 +65,7 @@ transporter.verify()
  */
 const sendOtpEmail = async (userEmail, otpCode) => {
     const mailOptions = {
-        from: `"JGM Industries" <${process.env.EMAIL_USER}>`,
+        from: `"JGM Industries" <${getFromAddress()}>`,
         to: userEmail,
         subject: 'Verify Your JGM Account - OTP',
         html: `
@@ -71,7 +91,7 @@ const sendOtpEmail = async (userEmail, otpCode) => {
  */
 const sendContactEmail = async (name, email, subject, message) => {
     const mailOptions = {
-        from: process.env.EMAIL_USER,
+        from: getFromAddress(),
         to: process.env.EMAIL_USER,
         replyTo: email,
         subject: `JGM Contact Form: ${subject}`,
