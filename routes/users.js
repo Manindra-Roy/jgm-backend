@@ -23,11 +23,33 @@ router.post("/register", authLimiter, async (req, res) => {
     if (error) return res.status(400).send(error.details[0].message);
 
     // SECURITY: Prevent duplicate registrations
-    const existingUser = await User.findOne({ email: req.body.email });
-    if (existingUser) return res.status(400).send("A user with this email already exists.");
-
+    let existingUser = await User.findOne({ email: req.body.email });
+    
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
+
+    if (existingUser) {
+        if (existingUser.isEmailVerified) {
+            return res.status(400).send("A user with this email already exists and is verified. Please log in.");
+        }
+        
+        // If unverified, update their details and send a new OTP
+        existingUser.name = req.body.name;
+        existingUser.passwordHash = bcrypt.hashSync(req.body.password, 10);
+        if (req.body.phone) existingUser.phone = req.body.phone;
+        existingUser.otp = otpCode;
+        existingUser.otpExpires = expiryTime;
+        
+        await existingUser.save();
+        
+        try {
+            await sendOtpEmail(existingUser.email, otpCode);
+            return res.status(200).send({ message: "Account details updated. Please check your email for the new OTP." });
+        } catch (emailError) {
+            console.error("❌ Failed to send OTP email:", emailError.message);
+            return res.status(500).send("Account updated but failed to send OTP email. Please try again later.");
+        }
+    }
 
     let user = new User({
         name: req.body.name,
