@@ -5,6 +5,11 @@
 
 const nodemailer = require('nodemailer');
 
+// --- DIAGNOSTIC: Check if email credentials are loaded ---
+console.log('📧 Email Config Check:');
+console.log('  EMAIL_USER loaded:', !!process.env.EMAIL_USER, process.env.EMAIL_USER ? `(${process.env.EMAIL_USER.substring(0, 3)}***)` : '(MISSING!)');
+console.log('  EMAIL_PASS loaded:', !!process.env.EMAIL_PASS, process.env.EMAIL_PASS ? `(${process.env.EMAIL_PASS.length} chars)` : '(MISSING!)');
+
 // Configure the SMTP transporter using environment variables
 const transporter = nodemailer.createTransport({
     service: 'gmail', 
@@ -13,6 +18,11 @@ const transporter = nodemailer.createTransport({
         pass: process.env.EMAIL_PASS  // Requires a Google App Password, not a standard login password
     }
 });
+
+// --- DIAGNOSTIC: Verify SMTP connection on startup ---
+transporter.verify()
+    .then(() => console.log('✅ SMTP connection verified — Gmail is ready to send emails'))
+    .catch((err) => console.error('❌ SMTP connection FAILED:', err.message));
 
 /**
  * Dispatches an HTML-formatted email containing a 6-digit OTP code.

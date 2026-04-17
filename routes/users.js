@@ -44,11 +44,12 @@ router.post("/register", authLimiter, async (req, res) => {
 
     try {
         await sendOtpEmail(user.email, otpCode);
+        res.status(200).send({ message: "Registration successful. Please check your email for the OTP." });
     } catch (emailError) {
-        console.error("Failed to send OTP email:", emailError);
+        console.error("❌ Failed to send OTP email:", emailError.message);
+        console.error("❌ Full error:", JSON.stringify(emailError, Object.getOwnPropertyNames(emailError)));
+        res.status(500).send("Account created but failed to send OTP email. Please try 'Resend OTP' or contact support.");
     }
-
-    res.status(200).send({ message: "Registration successful. Please check your email for the OTP." });
 });
 
 router.post("/verify-email", async (req, res) => {
