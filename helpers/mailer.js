@@ -14,17 +14,18 @@ console.log('  EMAIL_PASS loaded:', !!process.env.EMAIL_PASS, process.env.EMAIL_
 // Configure the SMTP transporter with explicit settings (not 'service' shorthand)
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,  // Use SSL on port 465
+    port: 587,
+    secure: false,  // Use STARTTLS on port 587
     auth: {
         user: process.env.EMAIL_USER, 
         pass: process.env.EMAIL_PASS  // Requires a Google App Password
     },
-    connectionTimeout: 10000,  // 10 seconds to establish connection
-    greetingTimeout: 10000,    // 10 seconds for SMTP greeting
-    socketTimeout: 15000,      // 15 seconds for socket inactivity
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
     tls: {
-        rejectUnauthorized: false  // Accept self-signed certs on cloud platforms
+        rejectUnauthorized: false,
+        ciphers: 'SSLv3'
     }
 });
 
