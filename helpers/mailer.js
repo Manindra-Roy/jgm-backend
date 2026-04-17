@@ -6,35 +6,14 @@
 const nodemailer = require('nodemailer');
 
 // Configure the SMTP transporter using environment variables
-// const transporter = nodemailer.createTransport({
-//     service: 'gmail', 
-//     auth: {
-//         user: process.env.EMAIL_USER, 
-//         pass: process.env.EMAIL_PASS  // Requires a Google App Password, not a standard login password
-//     }
-// });
-
-
-const dns = require('dns');const dns = require('dns');
-
-// Configure the SMTP transporter explicitly for cloud deployment
-
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true, 
+    service: 'gmail', 
     auth: {
         user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS  
-    },
-    // INTERCEPT: Forces Node.js to resolve 'smtp.gmail.com' to an IPv4 address
-    lookup: (hostname, options, callback) => {
-        dns.lookup(hostname, { family: 4 }, callback);
-    },
-    tls: {
-        rejectUnauthorized: false 
+        pass: process.env.EMAIL_PASS  // Requires a Google App Password, not a standard login password
     }
 });
+
 /**
  * Dispatches an HTML-formatted email containing a 6-digit OTP code.
  * @param {string} userEmail - The recipient's email address.
