@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema({
     apartment: { type: String, default: '' },
     zip: { type: String, default: '' },
     city: { type: String, default: '' },
+    state: { type: String, default: '' },
     country: { type: String, default: '' },
     
     // Security & Verification

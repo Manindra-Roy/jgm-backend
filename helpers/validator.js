@@ -23,8 +23,11 @@ const registerSchema = Joi.object({
     isAdmin: Joi.boolean(),
     street: Joi.string().allow(''),
     apartment: Joi.string().allow(''),
-    zip: Joi.string().allow(''),
+    zip: Joi.string().pattern(/^[0-9]+$/).allow('').messages({
+        'string.pattern.base': 'ZIP code must only contain numbers.'
+    }),
     city: Joi.string().allow(''),
+    state: Joi.string().allow(''),
     country: Joi.string().allow('')
 });
 
@@ -42,8 +45,11 @@ const updateUserSchema = Joi.object({
     isAdmin: Joi.boolean(),
     street: Joi.string().allow(''),
     apartment: Joi.string().allow(''),
-    zip: Joi.string().allow(''),
+    zip: Joi.string().pattern(/^[0-9]+$/).allow('').messages({
+        'string.pattern.base': 'ZIP code must only contain numbers.'
+    }),
     city: Joi.string().allow(''),
+    state: Joi.string().allow(''),
     country: Joi.string().allow('')
 });
 
@@ -89,9 +95,14 @@ const orderSchema = Joi.object({
     shippingAddress1: Joi.string().required(),
     shippingAddress2: Joi.string().allow(''),
     city: Joi.string().required(),
-    zip: Joi.string().required(),
+    state: Joi.string().required(),
+    zip: Joi.string().pattern(/^[0-9]+$/).required().messages({
+        'string.pattern.base': 'ZIP code must only contain numbers.'
+    }),
     country: Joi.string().required(),
-    phone: Joi.string().required(),
+    phone: Joi.string().pattern(phoneRegex).required().messages({
+        'string.pattern.base': 'Phone number must be between 10 to 15 digits and can only contain numbers and an optional leading +.'
+    }),
     status: Joi.string().valid('Pending', 'Processing', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'),
     user: Joi.string().hex().length(24).allow(null) // Can be null for guest checkout
 });

@@ -160,6 +160,7 @@ router.post("/", async (req, res) => {
             shippingAddress1: req.body.shippingAddress1,
             shippingAddress2: req.body.shippingAddress2,
             city: req.body.city,
+            state: req.body.state,
             zip: req.body.zip,
             country: req.body.country,
             phone: req.body.phone,

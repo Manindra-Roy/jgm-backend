@@ -192,6 +192,31 @@ router.get("/me/profile", async (req, res) => {
     }
 });
 
+router.put("/me/address", async (req, res) => {
+    try {
+        if (!req.auth || !req.auth.userId) return res.status(401).send("Not authenticated");
+        
+        const user = await User.findByIdAndUpdate(
+            req.auth.userId,
+            {
+                street: req.body.street || '',
+                apartment: req.body.apartment || '',
+                city: req.body.city || '',
+                state: req.body.state || '',
+                zip: req.body.zip || '',
+                country: req.body.country || 'India',
+                ...(req.body.phone && { phone: req.body.phone }) // Update phone if provided
+            },
+            { new: true, runValidators: true }
+        ).select("-passwordHash -otp -otpExpires");
+
+        if (!user) return res.status(404).send("User not found");
+        res.status(200).send({ message: "Address updated successfully!", user });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 router.post('/contact', async (req, res) => {
     const { name, email, subject, message } = req.body;
     try {
