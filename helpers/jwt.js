@@ -56,8 +56,8 @@ function authJwt() {
 async function isRevoked(req, token) {
     const path = req.originalUrl || req.url;
 
-    // 1. ALLOW normal customers to fetch their own profile and order history
-    if (path.includes('/users/me/profile') || path.includes('/orders/get/userorders')) {
+    // 1. ALLOW normal customers to fetch their own profile, save their address, and view order history
+    if (path.includes('/users/me/profile') || path.includes('/users/me/address') || path.includes('/orders/get/userorders')) {
         return false; // Do not revoke (Allow access)
     }
 

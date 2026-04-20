@@ -225,7 +225,7 @@ const cleanupStaleOrders = async () => {
 
 // Start the cleanup interval when the server boots
 setInterval(cleanupStaleOrders, CLEANUP_INTERVAL_MS);
-// Also run once immediately on startup to catch any orders from downtime
-cleanupStaleOrders();
+// Also run once after a delay to ensure database connection is established
+setTimeout(cleanupStaleOrders, 10000);
 
 module.exports = router;
