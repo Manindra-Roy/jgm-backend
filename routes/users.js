@@ -25,6 +25,12 @@ router.post("/register", authLimiter, async (req, res) => {
     // SECURITY: Prevent duplicate registrations
     let existingUser = await User.findOne({ email: req.body.email });
     
+    // SECURITY: Prevent duplicate phone numbers across accounts
+    const phoneInUse = await User.findOne({ phone: req.body.phone });
+    if (phoneInUse && (!existingUser || phoneInUse._id.toString() !== existingUser._id.toString())) {
+        return res.status(400).send("This phone number is already registered with another account.");
+    }
+
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
 
@@ -106,9 +112,11 @@ router.post("/login", authLimiter, async (req, res) => {
     }
 
     if (user && bcrypt.compareSync(req.body.password, user.passwordHash)) {
-        const token = jwt.sign({ userId: user.id, isAdmin: user.isAdmin }, secret, {
-            expiresIn: "1d",
-        });
+        const token = jwt.sign(
+            { userId: user.id, isAdmin: user.isAdmin, isSuperAdmin: user.isSuperAdmin },
+            secret,
+            { expiresIn: "1d" }
+        );
 
         // CRITICAL: Production Cross-Domain Cookie
         res.cookie('jgm_token', token, {
@@ -118,7 +126,11 @@ router.post("/login", authLimiter, async (req, res) => {
             maxAge: 30 * 24 * 60 * 60 * 1000 
         });
 
-        res.status(200).send({ message: "Logged in successfully", user: user.email });
+        res.status(200).send({
+            message: "Logged in successfully",
+            user: user.email,
+            isSuperAdmin: user.isSuperAdmin || false
+        });
     } else {
         res.status(400).send("password is wrong!");
     }
@@ -178,7 +190,11 @@ router.post("/reset-password", async (req, res) => {
 });
 
 router.get("/verify-session", (req, res) => {
-    res.status(200).json({ success: true, message: "Session is valid" });
+    res.status(200).json({
+        success: true,
+        message: "Session is valid",
+        isSuperAdmin: req.auth?.isSuperAdmin || false
+    });
 });
 
 router.get("/me/profile", async (req, res) => {
@@ -195,6 +211,12 @@ router.get("/me/profile", async (req, res) => {
 router.put("/me/address", async (req, res) => {
     try {
         if (!req.auth || !req.auth.userId) return res.status(401).send("Not authenticated");
+
+        // SECURITY: If phone is being changed, verify it's not taken by another user
+        if (req.body.phone) {
+            const phoneInUse = await User.findOne({ phone: req.body.phone, _id: { $ne: req.auth.userId } });
+            if (phoneInUse) return res.status(400).send("This phone number is already registered with another account.");
+        }
         
         const user = await User.findByIdAndUpdate(
             req.auth.userId,
@@ -205,7 +227,7 @@ router.put("/me/address", async (req, res) => {
                 state: req.body.state || '',
                 zip: req.body.zip || '',
                 country: req.body.country || 'India',
-                ...(req.body.phone && { phone: req.body.phone }) // Update phone if provided
+                ...(req.body.phone && { phone: req.body.phone })
             },
             { new: true, runValidators: true }
         ).select("-passwordHash -otp -otpExpires");
@@ -229,6 +251,9 @@ router.post('/contact', async (req, res) => {
 });
 
 router.get(`/`, async (req, res) => {
+    // SECURITY: Only Super Admins can view the user directory
+    if (!req.auth?.isSuperAdmin) return res.status(403).json({ message: "Access denied. Super Admin only." });
+
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
@@ -245,14 +270,26 @@ router.get(`/`, async (req, res) => {
 });
 
 router.get("/:id", async (req, res) => {
+    // SECURITY: Only Super Admins can view individual user details
+    if (!req.auth?.isSuperAdmin) return res.status(403).json({ message: "Access denied. Super Admin only." });
+
     const user = await User.findById(req.params.id).select("-passwordHash");
     if (!user) return res.status(500).json({ message: "The user with the given ID was not found." });
     res.status(200).send(user);
 });
 
 router.post("/", async (req, res) => {
+    // SECURITY: Only Super Admins can create users from admin panel
+    if (!req.auth?.isSuperAdmin) return res.status(403).json({ message: "Access denied. Super Admin only." });
+
     const { error } = registerSchema.validate(req.body);
     if (error) return res.status(400).send(error.details[0].message);
+
+    // SECURITY: Prevent duplicate email & phone from admin panel
+    const emailExists = await User.findOne({ email: req.body.email });
+    if (emailExists) return res.status(400).send("A user with this email already exists.");
+    const phoneExists = await User.findOne({ phone: req.body.phone });
+    if (phoneExists) return res.status(400).send("A user with this phone number already exists.");
 
     let user = new User({
         name: req.body.name,
@@ -274,11 +311,20 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
+    // SECURITY: Only Super Admins can edit user accounts
+    if (!req.auth?.isSuperAdmin) return res.status(403).json({ message: "Access denied. Super Admin only." });
+
     const { error } = updateUserSchema.validate(req.body);
     if (error) return res.status(400).send(error.details[0].message);
 
     const userExist = await User.findById(req.params.id);
     if (!userExist) return res.status(400).send("Invalid User");
+
+    // SECURITY: Check if the new phone number is already taken by a different user
+    if (req.body.phone && req.body.phone !== userExist.phone) {
+        const phoneInUse = await User.findOne({ phone: req.body.phone, _id: { $ne: req.params.id } });
+        if (phoneInUse) return res.status(400).send("This phone number is already registered with another account.");
+    }
 
     let newPassword = req.body.password ? bcrypt.hashSync(req.body.password, 10) : userExist.passwordHash;
 
@@ -304,6 +350,9 @@ router.put("/:id", async (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
+    // SECURITY: Only Super Admins can delete user accounts
+    if (!req.auth?.isSuperAdmin) return res.status(403).json({ message: "Access denied. Super Admin only." });
+
     User.findByIdAndDelete(req.params.id)
         .then((user) => {
             if (user) return res.status(200).json({ success: true, message: "the user is deleted!" });
