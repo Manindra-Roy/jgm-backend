@@ -10,6 +10,7 @@ const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 const { orderSchema } = require("../helpers/validator");
+const { restoreStock } = require("../helpers/stock-manager");
 
 /**
  * @route   GET /api/v1/orders/
@@ -217,11 +218,7 @@ router.put("/:id", async (req, res) => {
 
         // LOGIC: Restore inventory if an active order is cancelled
         if (req.body.status === 'Cancelled' && existingOrder.status !== 'Cancelled') {
-            for (const item of existingOrder.orderItems) {
-                await Product.findByIdAndUpdate(item.product, {
-                    $inc: { countInStock: item.quantity }
-                });
-            }
+            await restoreStock(existingOrder);
         }
 
         res.send(updatedOrder);
@@ -243,13 +240,7 @@ router.delete("/:id", async (req, res) => {
 
         // LOGIC: Only restore stock if the order wasn't already mathematically cancelled
         if (order.status !== 'Cancelled') {
-            for (const item of order.orderItems) {
-                if (item.product) {
-                    await Product.findByIdAndUpdate(item.product, {
-                        $inc: { countInStock: item.quantity }
-                    });
-                }
-            }
+            await restoreStock(order);
         }
 
         await Order.findByIdAndDelete(req.params.id);

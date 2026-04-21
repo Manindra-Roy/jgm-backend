@@ -8,6 +8,7 @@ const router = express.Router();
 const crypto = require("crypto");
 const axios = require("axios");
 const { Order } = require("../models/order");
+const { restoreStock } = require("../helpers/stock-manager");
 
 const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
 const SALT_KEY = process.env.PHONEPE_SALT_KEY;
@@ -99,11 +100,17 @@ router.post("/webhook", async (req, res) => {
         const order = await Order.findOne({ transactionId: merchantTransactionId });
         if (!order) return res.status(404).send("Order not found");
 
-        if (status === "PAYMENT_SUCCESS") {
+        const expectedAmountInPaise = Math.round(order.totalPrice * 100);
+        const actualAmountReceived = responseData.data.amount;
+
+        // SECURITY: Verify the amount paid exactly matches the order total
+        if (status === "PAYMENT_SUCCESS" && actualAmountReceived === expectedAmountInPaise) {
             order.paymentStatus = "Paid";
             order.status = "Processing";
             order.transactionId = bankTransactionId; 
         } else {
+            // LOGIC: Restore stock before marking the order as cancelled
+            await restoreStock(order);
             order.paymentStatus = "Failed";
             order.status = "Cancelled";
         }
@@ -141,6 +148,8 @@ router.get("/check-status/:orderId", async (req, res) => {
 
         // If no transaction ID exists, the user never reached PhonePe
         if (!order.transactionId) {
+            // LOGIC: Restore stock before marking the order as cancelled
+            await restoreStock(order);
             order.paymentStatus = "Failed";
             order.status = "Cancelled";
             await order.save();
@@ -165,8 +174,11 @@ router.get("/check-status/:orderId", async (req, res) => {
         });
 
         const phonepeStatus = response.data.code;
+        const actualAmount = response.data.data.amount;
+        const expectedAmount = Math.round(order.totalPrice * 100);
 
-        if (phonepeStatus === "PAYMENT_SUCCESS") {
+        // SECURITY: Deep verification of code, amount, and internal state
+        if (phonepeStatus === "PAYMENT_SUCCESS" && actualAmount === expectedAmount) {
             order.paymentStatus = "Paid";
             order.status = "Processing";
             order.transactionId = response.data.data.transactionId || order.transactionId;
@@ -176,6 +188,8 @@ router.get("/check-status/:orderId", async (req, res) => {
             return res.json({ paymentStatus: "Pending", orderStatus: order.status, message: "Payment is still being processed by PhonePe" });
         } else {
             // PAYMENT_ERROR, PAYMENT_DECLINED, etc.
+            // LOGIC: Restore stock before marking the order as cancelled
+            await restoreStock(order);
             order.paymentStatus = "Failed";
             order.status = "Cancelled";
             await order.save();
@@ -202,21 +216,32 @@ const cleanupStaleOrders = async () => {
     try {
         const cutoffTime = new Date(Date.now() - STALE_ORDER_TIMEOUT_MS);
 
-        const result = await Order.updateMany(
-            { 
-                paymentStatus: "Pending", 
-                dateOrdered: { $lt: cutoffTime } 
-            },
-            { 
-                $set: { 
-                    paymentStatus: "Failed", 
-                    status: "Cancelled" 
-                } 
-            }
-        );
+        // Fetch orders that need to be cleaned up
+        const staleOrders = await Order.find({ 
+            paymentStatus: "Pending", 
+            dateOrdered: { $lt: cutoffTime } 
+        });
 
-        if (result.modifiedCount > 0) {
-            console.log(`🧹 Auto-cancelled ${result.modifiedCount} stale pending order(s).`);
+        if (staleOrders.length > 0) {
+            let processedCount = 0;
+            
+            for (const order of staleOrders) {
+                try {
+                    // 1. Return stock to inventory
+                    await restoreStock(order);
+                    
+                    // 2. Mark order as failed/cancelled
+                    order.paymentStatus = "Failed";
+                    order.status = "Cancelled";
+                    await order.save();
+                    
+                    processedCount++;
+                } catch (err) {
+                    console.error(`❌ Cleanup failed for stale order ${order._id}:`, err.message);
+                }
+            }
+            
+            console.log(`🧹 Auto-cancelled ${processedCount} stale pending order(s) and restored inventory.`);
         }
     } catch (error) {
         console.error("Stale order cleanup error:", error.message);
