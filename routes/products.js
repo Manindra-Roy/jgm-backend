@@ -30,6 +30,10 @@ router.get(`/`, async (req, res) => {
     if (req.query.categories) {
         filter = { category: req.query.categories.split(",") };
     }
+    // Support Brand Filtering: /api/v1/products?brand=JGM
+    if (req.query.brand) {
+        filter.brand = { $regex: req.query.brand, $options: "i" };
+    }
     // Support URL search: /api/v1/products?search=oil
     if (req.query.search) {
         filter.name = { $regex: req.query.search, $options: "i" };
