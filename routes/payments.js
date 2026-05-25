@@ -168,8 +168,12 @@ const STALE_ORDER_TIMEOUT_MS = 30 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
 
 const cleanup = async () => {
-    const count = await orderRepository.cleanupStaleOrders(STALE_ORDER_TIMEOUT_MS);
-    if (count > 0) console.log(`🧹 Auto-cancelled ${count} stale order(s).`);
+    try {
+        const count = await orderRepository.cleanupStaleOrders(STALE_ORDER_TIMEOUT_MS);
+        if (count > 0) console.log(`🧹 Auto-cancelled ${count} stale order(s).`);
+    } catch (error) {
+        console.error("❌ Background cleanup failed:", error.message);
+    }
 };
 
 setInterval(cleanup, CLEANUP_INTERVAL_MS);
