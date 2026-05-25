@@ -22,7 +22,7 @@ const initiatePayment = async (orderId) => {
     const order = await orderRepository.findById(orderId);
     if (!order) {
         const error = new Error("Order not found");
-        error.status = 404;
+        error.isOrderNotFound = true;
         throw error;
     }
 
@@ -32,7 +32,7 @@ const initiatePayment = async (orderId) => {
     const payload = {
         merchantId: MERCHANT_ID,
         merchantTransactionId: merchantTransactionId,
-        merchantUserId: order.user ? order.user.toString() : "GUEST-USER",
+        merchantUserId: order.user ? (order.user._id ? order.user._id.toString() : order.user.toString()) : "GUEST-USER",
         amount: amountInPaise,
         redirectUrl: `${process.env.FRONTEND_URL}/payment-success/${order._id}`, 
         redirectMode: "REDIRECT",
@@ -66,9 +66,10 @@ router.post("/checkout/:orderId", async (req, res) => {
         });
     } catch (error) {
         console.error("PhonePe Error:", error.response?.data || error.message);
-        const status = error.status || 500;
-        const message = error.status === 404 ? "Order not found" : "Payment initiation failed";
-        res.status(status).json({ success: false, message });
+        if (error.isOrderNotFound) {
+            return res.status(404).json({ success: false, message: "Order not found" });
+        }
+        res.status(500).json({ success: false, message: "Payment initiation failed" });
     }
 });
 
@@ -78,9 +79,10 @@ router.get("/checkout/:orderId", async (req, res) => {
         res.redirect(paymentUrl);
     } catch (error) {
         console.error("PhonePe Error:", error.response?.data || error.message);
-        const status = error.status || 500;
-        const message = error.status === 404 ? "Order not found" : "Payment initiation failed";
-        res.status(status).send(message);
+        if (error.isOrderNotFound) {
+            return res.status(404).send("Order not found");
+        }
+        res.status(500).send("Payment initiation failed");
     }
 });
 
