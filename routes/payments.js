@@ -18,46 +18,69 @@ const PHONEPE_URL = isProd
     ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"              
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/pay"; 
 
+const initiatePayment = async (orderId) => {
+    const order = await orderRepository.findById(orderId);
+    if (!order) {
+        const error = new Error("Order not found");
+        error.status = 404;
+        throw error;
+    }
+
+    const amountInPaise = Math.round(order.totalPrice * 100);
+    const merchantTransactionId = `JGM-${order._id.toString().slice(-6)}-${Date.now()}`;
+
+    const payload = {
+        merchantId: MERCHANT_ID,
+        merchantTransactionId: merchantTransactionId,
+        merchantUserId: order.user ? order.user.toString() : "GUEST-USER",
+        amount: amountInPaise,
+        redirectUrl: `${process.env.FRONTEND_URL}/payment-success/${order._id}`, 
+        redirectMode: "REDIRECT",
+        callbackUrl: process.env.PHONEPE_WEBHOOK_URL, 
+        paymentInstrument: { type: "PAY_PAGE" },
+    };
+
+    const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
+    const stringToHash = base64Payload + "/pg/v1/pay" + SALT_KEY;
+    const checksum = crypto.createHash("sha256").update(stringToHash).digest("hex") + "###" + SALT_INDEX;
+
+    const response = await axios.post(PHONEPE_URL, { request: base64Payload }, {
+        headers: {
+            "Content-Type": "application/json",
+            "X-VERIFY": checksum,
+            accept: "application/json",
+        },
+    });
+
+    await orderRepository.update(order._id, { transactionId: merchantTransactionId });
+
+    return response.data.data.instrumentResponse.redirectInfo.url;
+};
+
 router.post("/checkout/:orderId", async (req, res) => {
     try {
-        const order = await orderRepository.findById(req.params.orderId);
-        if (!order) return res.status(404).send("Order not found");
-
-        const amountInPaise = Math.round(order.totalPrice * 100);
-        const merchantTransactionId = `JGM-${order._id.toString().slice(-6)}-${Date.now()}`;
-
-        const payload = {
-            merchantId: MERCHANT_ID,
-            merchantTransactionId: merchantTransactionId,
-            merchantUserId: order.user ? order.user.toString() : "GUEST-USER",
-            amount: amountInPaise,
-            redirectUrl: `${process.env.FRONTEND_URL}/payment-success/${order._id}`, 
-            redirectMode: "REDIRECT",
-            callbackUrl: process.env.PHONEPE_WEBHOOK_URL, 
-            paymentInstrument: { type: "PAY_PAGE" },
-        };
-
-        const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-        const stringToHash = base64Payload + "/pg/v1/pay" + SALT_KEY;
-        const checksum = crypto.createHash("sha256").update(stringToHash).digest("hex") + "###" + SALT_INDEX;
-
-        const response = await axios.post(PHONEPE_URL, { request: base64Payload }, {
-            headers: {
-                "Content-Type": "application/json",
-                "X-VERIFY": checksum,
-                accept: "application/json",
-            },
-        });
-
-        await orderRepository.update(order._id, { transactionId: merchantTransactionId });
-
+        const paymentUrl = await initiatePayment(req.params.orderId);
         res.status(200).json({
             success: true,
-            paymentUrl: response.data.data.instrumentResponse.redirectInfo.url,
+            paymentUrl,
         });
     } catch (error) {
         console.error("PhonePe Error:", error.response?.data || error.message);
-        res.status(500).json({ success: false, message: "Payment initiation failed" });
+        const status = error.status || 500;
+        const message = error.status === 404 ? "Order not found" : "Payment initiation failed";
+        res.status(status).json({ success: false, message });
+    }
+});
+
+router.get("/checkout/:orderId", async (req, res) => {
+    try {
+        const paymentUrl = await initiatePayment(req.params.orderId);
+        res.redirect(paymentUrl);
+    } catch (error) {
+        console.error("PhonePe Error:", error.response?.data || error.message);
+        const status = error.status || 500;
+        const message = error.status === 404 ? "Order not found" : "Payment initiation failed";
+        res.status(status).send(message);
     }
 });
 
