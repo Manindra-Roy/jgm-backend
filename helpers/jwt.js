@@ -57,19 +57,45 @@ function authJwt() {
  * @returns {Promise<boolean>} True if access should be revoked (blocked), False if allowed.
  */
 async function isRevoked(req, token) {
+    // 1. ALLOW admins to access everything
+    if (token.payload && token.payload.isAdmin) {
+        return false; // Do not revoke
+    }
+
     const path = req.originalUrl || req.url;
+    const cleanPath = path.split('?')[0].replace(/\/$/, '');
+    const method = req.method;
 
-    // 1. ALLOW normal customers to fetch their own profile, save their address, and view order history
-    if (path.includes('/users/me/profile') || path.includes('/users/me/address') || path.includes('/orders/get/userorders')) {
-        return false; // Do not revoke (Allow access)
+    // 2. ALLOW normal customers to access specific safe routes
+    // Profile, Address, and verify-session
+    if (cleanPath.endsWith('/users/me/profile') && method === 'GET') {
+        return false;
+    }
+    if (cleanPath.endsWith('/users/me/address') && method === 'PUT') {
+        return false;
+    }
+    if (cleanPath.endsWith('/users/verify-session') && method === 'GET') {
+        return false;
     }
 
-    // 2. BLOCK normal customers from all other protected routes (e.g., Admin Panel routes)
-    if (!token.payload.isAdmin) {
-        return true; // Revoke! (Block access)
+    // Order placement: POST /api/v1/orders
+    if (cleanPath.endsWith('/orders') && method === 'POST') {
+        return false;
     }
-    
-    return false; // User is an Admin, allow access to everything
+
+    // User order history: GET /api/v1/orders/get/userorders/:userid
+    if (cleanPath.includes('/orders/get/userorders') && method === 'GET') {
+        return false;
+    }
+
+    // Single order details: GET /api/v1/orders/:id
+    const orderDetailRegex = /\/orders\/[a-fA-F0-9]{24}$/;
+    if (orderDetailRegex.test(cleanPath) && method === 'GET') {
+        return false;
+    }
+
+    // 3. BLOCK normal customers from all other protected routes (e.g., Admin Panel routes)
+    return true; // Revoke!
 }
 
 module.exports = authJwt;

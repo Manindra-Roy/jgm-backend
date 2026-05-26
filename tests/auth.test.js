@@ -126,4 +126,57 @@ describe('JGM Backend Production-Ready Security Tests', () => {
             expect(res.statusCode).toBe(200);
         });
     });
+
+    describe('POST /api/v1/orders - Access Control', () => {
+        it('should return 401 if unauthenticated', async () => {
+            const res = await request(app).post('/api/v1/orders').send({});
+            expect(res.statusCode).toBe(401);
+        });
+
+        it('should NOT return 401 revoked token for authenticated customer', async () => {
+            const res = await request(app)
+                .post('/api/v1/orders')
+                .set('Cookie', [`jgm_token=${customerToken}`])
+                .send({});
+            // Should get past JWT checks and fail at Joi validation (400)
+            expect(res.statusCode).toBe(400);
+        });
+    });
+
+    describe('GET /api/v1/orders/:id - Access Control', () => {
+        it('should return 401 if unauthenticated', async () => {
+            const res = await request(app).get('/api/v1/orders/6a00afde6235f14af7a9c0f5');
+            expect(res.statusCode).toBe(401);
+        });
+
+        it('should allow customer to view their own order details', async () => {
+            const orderRepository = require('../repositories/OrderRepository');
+            orderRepository.findById = jest.fn().mockResolvedValue({
+                _id: '6a00afde6235f14af7a9c0f5',
+                user: 'customer123',
+                totalPrice: 100
+            });
+
+            const res = await request(app)
+                .get('/api/v1/orders/6a00afde6235f14af7a9c0f5')
+                .set('Cookie', [`jgm_token=${customerToken}`]);
+            expect(res.statusCode).toBe(200);
+            expect(res.body.user).toBe('customer123');
+        });
+
+        it('should block customer from viewing other users order details', async () => {
+            const orderRepository = require('../repositories/OrderRepository');
+            orderRepository.findById = jest.fn().mockResolvedValue({
+                _id: '6a00afde6235f14af7a9c0f5',
+                user: 'otherUser',
+                totalPrice: 100
+            });
+
+            const res = await request(app)
+                .get('/api/v1/orders/6a00afde6235f14af7a9c0f5')
+                .set('Cookie', [`jgm_token=${customerToken}`]);
+            expect(res.statusCode).toBe(403);
+            expect(res.body.message).toBe('Access denied. You can only view your own orders.');
+        });
+    });
 });
