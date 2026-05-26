@@ -15,7 +15,7 @@ const SALT_INDEX = process.env.PHONEPE_SALT_INDEX || "1";
 
 const isProd = process.env.PHONEPE_ENV === 'PROD';
 const PHONEPE_URL = isProd 
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"              
+    ? "https://api.phonepe.com/apis/pg/v1/pay"              
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/pay"; 
 
 const initiatePayment = async (orderId) => {
@@ -119,7 +119,7 @@ router.post("/webhook", async (req, res) => {
 });
 
 const PHONEPE_STATUS_URL = isProd
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/status"
+    ? "https://api.phonepe.com/apis/pg/v1/status"
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/status";
 
 router.get("/check-status/:orderId", async (req, res) => {
