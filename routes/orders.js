@@ -98,6 +98,7 @@ router.post("/", async (req, res) => {
         session.endSession();
         res.send(order);
     } catch (err) {
+        console.error("❌ Order Creation Error:", err);
         await session.abortTransaction();
         session.endSession();
         const status = err.message.includes('Insufficient') || err.message.includes('not found') ? 400 : 500;
