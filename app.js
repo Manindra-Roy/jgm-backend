@@ -81,20 +81,6 @@ app.use(`${api}/payments`, paymentsRoutes);
 
 app.use(errorHandler);                 
 
-// --- DATABASE CONNECTION & SERVER IGNITION ---
-if (require.main === module) {
-    mongoose.connect(process.env.CONNECTION_STRING, {
-        dbName: 'jgm-db'
-    })
-    .then(() => console.log('✅ JGM Database Connection is ready...'))
-    .catch((err) => console.error('❌ Database Connection Error:', err));
-
-    const PORT = process.env.PORT || 3000;
-    server.listen(PORT, () => {
-        console.log(`🚀 JGM Backend PRODUCTION server running on port ${PORT}`);
-    });
-}
-
 // --- WEBSOCKET SERVER ---
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -116,5 +102,19 @@ io.on('connection', (socket) => {
         io.emit('liveUsersUpdate', liveUserCount);
     });
 });
+
+// --- DATABASE CONNECTION & SERVER IGNITION ---
+if (require.main === module) {
+    mongoose.connect(process.env.CONNECTION_STRING, {
+        dbName: 'jgm-db'
+    })
+    .then(() => console.log('✅ JGM Database Connection is ready...'))
+    .catch((err) => console.error('❌ Database Connection Error:', err));
+
+    const PORT = process.env.PORT || 3000;
+    server.listen(PORT, () => {
+        console.log(`🚀 JGM Backend PRODUCTION server running on port ${PORT}`);
+    });
+}
 
 module.exports = { app, server, io };
