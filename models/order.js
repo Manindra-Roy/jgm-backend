@@ -39,7 +39,7 @@ const orderSchema = mongoose.Schema({
     
     // Gateway Payments & Tracking
     paymentStatus: { type: String, default: 'Pending', index: true },
-    transactionId: { type: String, default: '', index: { unique: true, sparse: true } },
+    transactionId: { type: String, index: { unique: true, sparse: true } },
     isStockRestored: { type: Boolean, default: false },
     courierName: { type: String, default: '' },
     trackingNumber: { type: String, default: '' }
