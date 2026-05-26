@@ -21,7 +21,8 @@ const productSchema = mongoose.Schema({
     category: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Category', // Establishes a relationship with the Category table
-        required: true
+        required: true,
+        index: true
     },
     
     // Inventory & Metrics

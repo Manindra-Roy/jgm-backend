@@ -178,7 +178,9 @@ const cleanup = async () => {
     }
 };
 
-setInterval(cleanup, CLEANUP_INTERVAL_MS);
-setTimeout(cleanup, 10000);
+if (process.env.NODE_ENV !== 'test') {
+    setInterval(cleanup, CLEANUP_INTERVAL_MS);
+    setTimeout(cleanup, 10000);
+}
 
 module.exports = router;

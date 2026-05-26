@@ -34,12 +34,12 @@ const orderSchema = mongoose.Schema({
     
     // Financials & Ownership
     totalPrice: { type: Number },
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    dateOrdered: { type: Date, default: Date.now },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+    dateOrdered: { type: Date, default: Date.now, index: true },
     
     // Gateway Payments & Tracking
-    paymentStatus: { type: String, default: 'Pending' },
-    transactionId: { type: String, default: '' },
+    paymentStatus: { type: String, default: 'Pending', index: true },
+    transactionId: { type: String, default: '', index: { unique: true, sparse: true } },
     isStockRestored: { type: Boolean, default: false },
     courierName: { type: String, default: '' },
     trackingNumber: { type: String, default: '' }

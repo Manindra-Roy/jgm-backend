@@ -31,6 +31,13 @@ router.get(`/:id`, async (req, res) => {
     try {
         const order = await orderRepository.findById(req.params.id);
         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+        // SECURITY: Verify that the user is either an admin or the owner of the order
+        const orderUserId = order.user ? (order.user._id ? order.user._id.toString() : order.user.toString()) : null;
+        if (!req.auth?.isAdmin && req.auth?.userId !== orderUserId) {
+            return res.status(403).json({ message: "Access denied. You can only view your own orders." });
+        }
+
         res.send(order);
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -54,7 +61,11 @@ router.get("/get/dashboard-stats", async (req, res) => {
  */
 router.post("/", async (req, res) => {
     const { error } = orderSchema.validate(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
+    if (error) return res.status(400).json({ message: error.details[0].message });
+
+    if (!req.auth || !req.auth.userId) {
+        return res.status(401).json({ message: "User is not authenticated." });
+    }
 
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -68,7 +79,7 @@ router.post("/", async (req, res) => {
             calculatedTotalPrice += product.price * item.quantity;
         }
 
-        const userId = (req.auth && req.auth.userId) ? req.auth.userId : (req.body.user || null);
+        const userId = req.auth.userId;
 
         const order = await orderRepository.create({
             ...req.body,
@@ -90,7 +101,7 @@ router.post("/", async (req, res) => {
         await session.abortTransaction();
         session.endSession();
         const status = err.message.includes('Insufficient') || err.message.includes('not found') ? 400 : 500;
-        res.status(status).send(err.message);
+        res.status(status).json({ message: err.message });
     }
 });
 
@@ -100,7 +111,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     try {
         const existingOrder = await orderRepository.findById(req.params.id);
-        if (!existingOrder) return res.status(404).send("Order not found!");
+        if (!existingOrder) return res.status(404).json({ message: "Order not found!" });
 
         const updatedOrder = await orderRepository.update(req.params.id, {
             status: req.body.status,
@@ -114,7 +125,7 @@ router.put("/:id", async (req, res) => {
 
         res.send(updatedOrder);
     } catch (err) {
-        res.status(500).send(err.message);
+        res.status(500).json({ message: err.message });
     }
 });
 
@@ -154,6 +165,10 @@ router.get(`/get/count`, async (req, res) => {
  */
 router.get(`/get/userorders/:userid`, async (req, res) => {
     try {
+        // SECURITY: Verify that the authenticated user is either an Admin or requesting their own order history
+        if (!req.auth?.isAdmin && req.auth?.userId !== req.params.userid) {
+            return res.status(403).json({ message: "Access denied. You can only view your own orders." });
+        }
         const userOrderList = await orderRepository.findByUserId(req.params.userid);
         res.send(userOrderList);
     } catch (err) {

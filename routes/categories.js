@@ -61,7 +61,7 @@ router.post('/', uploadOptions.single('image'), async (req, res) => {
     });
 
     category = await category.save();
-    if (!category) return res.status(400).send('The category cannot be created!');
+    if (!category) return res.status(400).json({ message: 'The category cannot be created!' });
     res.send(category);
 });
 
@@ -72,7 +72,7 @@ router.post('/', uploadOptions.single('image'), async (req, res) => {
  */
 router.put('/:id', uploadOptions.single('image'), async (req, res) => {
     const categoryExists = await Category.findById(req.params.id);
-    if (!categoryExists) return res.status(400).send('Invalid Category!');
+    if (!categoryExists) return res.status(400).json({ message: 'Invalid Category!' });
 
     const file = req.file;
     let imagepath;
@@ -108,7 +108,7 @@ router.put('/:id', uploadOptions.single('image'), async (req, res) => {
         { returnDocument: 'after' }
     );
 
-    if (!category) return res.status(400).send('The category cannot be updated!');
+    if (!category) return res.status(400).json({ message: 'The category cannot be updated!' });
     res.send(category);
 });
 

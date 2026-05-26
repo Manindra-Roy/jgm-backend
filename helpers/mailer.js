@@ -29,12 +29,14 @@ if (!isProduction) {
         }
     });
 
-    localTransporter.verify()
-        .then(() => console.log('✅ SMTP verified — Gmail is ready to send emails'))
-        .catch((err) => {
-            console.error('❌ SMTP verification FAILED:', err.message);
-            console.error('❌ Error code:', err.code);
-        });
+    if (process.env.NODE_ENV !== 'test') {
+        localTransporter.verify()
+            .then(() => console.log('✅ SMTP verified — Gmail is ready to send emails'))
+            .catch((err) => {
+                console.error('❌ SMTP verification FAILED:', err.message);
+                console.error('❌ Error code:', err.code);
+            });
+    }
 }
 
 // The "from" address: In production use the verified Brevo sender, locally use Gmail

@@ -61,7 +61,7 @@ router.get(`/`, async (req, res) => {
  */
 router.get(`/:id`, async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
-        return res.status(400).send("Invalid Product Id");
+        return res.status(400).json({ message: "Invalid Product Id" });
     }
     const product = await Product.findById(req.params.id).populate("category");
     if (!product) return res.status(500).json({ success: false });
@@ -79,13 +79,13 @@ router.get(`/:id`, async (req, res) => {
  */
 router.post(`/`, uploadOptions.single("image"), async (req, res) => {
     const { error } = productSchema.validate(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
+    if (error) return res.status(400).json({ message: error.details[0].message });
 
     const category = await Category.findById(req.body.category);
-    if (!category) return res.status(400).send("Invalid Category");
+    if (!category) return res.status(400).json({ message: "Invalid Category" });
 
     const file = req.file;
-    if (!file) return res.status(400).send("No image in the request");
+    if (!file) return res.status(400).json({ message: "No image in the request" });
 
     let product = new Product({
         name: req.body.name,
@@ -102,7 +102,7 @@ router.post(`/`, uploadOptions.single("image"), async (req, res) => {
     });
 
     product = await product.save();
-    if (!product) return res.status(500).send("The product cannot be created");
+    if (!product) return res.status(500).json({ message: "The product cannot be created" });
     res.send(product);
 });
 
@@ -113,17 +113,17 @@ router.post(`/`, uploadOptions.single("image"), async (req, res) => {
  */
 router.put("/:id", uploadOptions.single("image"), async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
-        return res.status(400).send("Invalid Product Id");
+        return res.status(400).json({ message: "Invalid Product Id" });
     }
 
     const { error } = productSchema.validate(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
+    if (error) return res.status(400).json({ message: error.details[0].message });
 
     const category = await Category.findById(req.body.category);
-    if (!category) return res.status(400).send("Invalid Category");
+    if (!category) return res.status(400).json({ message: "Invalid Category" });
 
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(400).send("Invalid Product!");
+    if (!product) return res.status(400).json({ message: "Invalid Product!" });
 
     const file = req.file;
     let imagepath;
@@ -165,7 +165,7 @@ router.put("/:id", uploadOptions.single("image"), async (req, res) => {
         { returnDocument: "after" },
     );
 
-    if (!updatedProduct) return res.status(500).send("the product cannot be updated!");
+    if (!updatedProduct) return res.status(500).json({ message: "the product cannot be updated!" });
     res.send(updatedProduct);
 });
 

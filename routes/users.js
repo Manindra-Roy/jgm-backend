@@ -20,7 +20,7 @@ const authLimiter = rateLimit({
 
 router.post("/register", authLimiter, async (req, res) => {
     const { error } = registerSchema.validate(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
+    if (error) return res.status(400).json({ message: error.details[0].message });
 
     // SECURITY: Prevent duplicate registrations
     let existingUser = await User.findOne({ email: req.body.email });
@@ -28,7 +28,7 @@ router.post("/register", authLimiter, async (req, res) => {
     // SECURITY: Prevent duplicate phone numbers across accounts
     const phoneInUse = await User.findOne({ phone: req.body.phone });
     if (phoneInUse && (!existingUser || phoneInUse._id.toString() !== existingUser._id.toString())) {
-        return res.status(400).send("This phone number is already registered with another account.");
+        return res.status(400).json({ message: "This phone number is already registered with another account." });
     }
 
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -36,7 +36,7 @@ router.post("/register", authLimiter, async (req, res) => {
 
     if (existingUser) {
         if (existingUser.isEmailVerified) {
-            return res.status(400).send("A user with this email already exists and is verified. Please log in.");
+            return res.status(400).json({ message: "A user with this email already exists and is verified. Please log in." });
         }
         
         // If unverified, update their details and send a new OTP
@@ -53,7 +53,7 @@ router.post("/register", authLimiter, async (req, res) => {
             return res.status(200).send({ message: "Account details updated. Please check your email for the new OTP." });
         } catch (emailError) {
             console.error("❌ Failed to send OTP email:", emailError.message);
-            return res.status(500).send("Account updated but failed to send OTP email. Please try again later.");
+            return res.status(500).json({ message: "Account updated but failed to send OTP email. Please try again later." });
         }
     }
 
@@ -68,7 +68,7 @@ router.post("/register", authLimiter, async (req, res) => {
     });
 
     user = await user.save();
-    if (!user) return res.status(400).send("The user cannot be created!");
+    if (!user) return res.status(400).json({ message: "The user cannot be created!" });
 
     try {
         await sendOtpEmail(user.email, otpCode);
@@ -76,7 +76,7 @@ router.post("/register", authLimiter, async (req, res) => {
     } catch (emailError) {
         console.error("❌ Failed to send OTP email:", emailError.message);
         console.error("❌ Full error:", JSON.stringify(emailError, Object.getOwnPropertyNames(emailError)));
-        res.status(500).send("Account created but failed to send OTP email. Please try 'Resend OTP' or contact support.");
+        res.status(500).json({ message: "Account created but failed to send OTP email. Please try 'Resend OTP' or contact support." });
     }
 });
 
@@ -84,11 +84,11 @@ router.post("/verify-email", async (req, res) => {
     const { email, otp } = req.body;
 
     const user = await User.findOne({ email: email });
-    if (!user) return res.status(400).send("User not found.");
-    if (user.isEmailVerified) return res.status(400).send("Email is already verified.");
+    if (!user) return res.status(400).json({ message: "User not found." });
+    if (user.isEmailVerified) return res.status(400).json({ message: "Email is already verified." });
 
-    if (user.otp !== otp) return res.status(400).send("Invalid OTP code.");
-    if (user.otpExpires < Date.now()) return res.status(400).send("OTP has expired. Please request a new one.");
+    if (user.otp !== otp) return res.status(400).json({ message: "Invalid OTP code." });
+    if (user.otpExpires < Date.now()) return res.status(400).json({ message: "OTP has expired. Please request a new one." });
 
     user.isEmailVerified = true;
     user.otp = undefined;
@@ -100,15 +100,15 @@ router.post("/verify-email", async (req, res) => {
 
 router.post("/login", authLimiter, async (req, res) => {
     const { error } = loginSchema.validate(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
+    if (error) return res.status(400).json({ message: error.details[0].message });
 
     const user = await User.findOne({ email: req.body.email });
     const secret = process.env.secret || process.env.SECRET;
 
-    if (!user) return res.status(400).send("The user not found");
+    if (!user) return res.status(400).json({ message: "The user not found" });
 
     if (!user.isEmailVerified && !user.isAdmin) {
-        return res.status(403).send("Please verify your email address before logging in.");
+        return res.status(403).json({ message: "Please verify your email address before logging in." });
     }
 
     if (user && bcrypt.compareSync(req.body.password, user.passwordHash)) {
@@ -132,7 +132,7 @@ router.post("/login", authLimiter, async (req, res) => {
             isSuperAdmin: user.isSuperAdmin || false
         });
     } else {
-        res.status(400).send("password is wrong!");
+        res.status(400).json({ message: "password is wrong!" });
     }
 });
 
@@ -148,10 +148,10 @@ router.post("/logout", (req, res) => {
 
 router.post("/forgot-password", authLimiter, async (req, res) => {
     const { email } = req.body;
-    if (!email) return res.status(400).send("Email is required");
+    if (!email) return res.status(400).json({ message: "Email is required" });
 
     const user = await User.findOne({ email: email });
-    if (!user) return res.status(400).send("User with this email does not exist.");
+    if (!user) return res.status(400).json({ message: "User with this email does not exist." });
 
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
@@ -165,21 +165,21 @@ router.post("/forgot-password", authLimiter, async (req, res) => {
         res.status(200).send({ message: "Password reset OTP sent to your email." });
     } catch (emailError) {
         console.error("Failed to send OTP email:", emailError);
-        res.status(500).send("Failed to send email. Please try again later.");
+        res.status(500).json({ message: "Failed to send email. Please try again later." });
     }
 });
 
 router.post("/reset-password", async (req, res) => {
     const { email, otp, newPassword } = req.body;
 
-    if (!email || !otp || !newPassword) return res.status(400).send("All fields are required.");
-    if (newPassword.length < 6) return res.status(400).send("Password must be at least 6 characters long.");
+    if (!email || !otp || !newPassword) return res.status(400).json({ message: "All fields are required." });
+    if (newPassword.length < 6) return res.status(400).json({ message: "Password must be at least 6 characters long." });
 
     const user = await User.findOne({ email: email });
-    if (!user) return res.status(400).send("User not found.");
+    if (!user) return res.status(400).json({ message: "User not found." });
 
-    if (user.otp !== otp) return res.status(400).send("Invalid OTP code.");
-    if (user.otpExpires < Date.now()) return res.status(400).send("OTP has expired. Please request a new one.");
+    if (user.otp !== otp) return res.status(400).json({ message: "Invalid OTP code." });
+    if (user.otpExpires < Date.now()) return res.status(400).json({ message: "OTP has expired. Please request a new one." });
 
     user.passwordHash = bcrypt.hashSync(newPassword, 10);
     user.otp = undefined;
@@ -199,9 +199,9 @@ router.get("/verify-session", (req, res) => {
 
 router.get("/me/profile", async (req, res) => {
     try {
-        if (!req.auth || !req.auth.userId) return res.status(401).send("Not authenticated");
+        if (!req.auth || !req.auth.userId) return res.status(401).json({ message: "Not authenticated" });
         const user = await User.findById(req.auth.userId).select("-passwordHash -otp -otpExpires");
-        if (!user) return res.status(404).send("User not found");
+        if (!user) return res.status(404).json({ message: "User not found" });
         res.status(200).send(user);
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -210,12 +210,12 @@ router.get("/me/profile", async (req, res) => {
 
 router.put("/me/address", async (req, res) => {
     try {
-        if (!req.auth || !req.auth.userId) return res.status(401).send("Not authenticated");
+        if (!req.auth || !req.auth.userId) return res.status(401).json({ message: "Not authenticated" });
 
         // SECURITY: If phone is being changed, verify it's not taken by another user
         if (req.body.phone) {
             const phoneInUse = await User.findOne({ phone: req.body.phone, _id: { $ne: req.auth.userId } });
-            if (phoneInUse) return res.status(400).send("This phone number is already registered with another account.");
+            if (phoneInUse) return res.status(400).json({ message: "This phone number is already registered with another account." });
         }
         
         const user = await User.findByIdAndUpdate(
@@ -232,7 +232,7 @@ router.put("/me/address", async (req, res) => {
             { returnDocument: 'after', runValidators: true }
         ).select("-passwordHash -otp -otpExpires");
 
-        if (!user) return res.status(404).send("User not found");
+        if (!user) return res.status(404).json({ message: "User not found" });
         res.status(200).send({ message: "Address updated successfully!", user });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -283,13 +283,13 @@ router.post("/", async (req, res) => {
     if (!req.auth?.isSuperAdmin) return res.status(403).json({ message: "Access denied. Super Admin only." });
 
     const { error } = registerSchema.validate(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
+    if (error) return res.status(400).json({ message: error.details[0].message });
 
     // SECURITY: Prevent duplicate email & phone from admin panel
     const emailExists = await User.findOne({ email: req.body.email });
-    if (emailExists) return res.status(400).send("A user with this email already exists.");
+    if (emailExists) return res.status(400).json({ message: "A user with this email already exists." });
     const phoneExists = await User.findOne({ phone: req.body.phone });
-    if (phoneExists) return res.status(400).send("A user with this phone number already exists.");
+    if (phoneExists) return res.status(400).json({ message: "A user with this phone number already exists." });
 
     let user = new User({
         name: req.body.name,
@@ -306,7 +306,7 @@ router.post("/", async (req, res) => {
     });
     
     user = await user.save();
-    if (!user) return res.status(400).send("The user cannot be created!");
+    if (!user) return res.status(400).json({ message: "The user cannot be created!" });
     res.send(user);
 });
 
@@ -315,15 +315,15 @@ router.put("/:id", async (req, res) => {
     if (!req.auth?.isSuperAdmin) return res.status(403).json({ message: "Access denied. Super Admin only." });
 
     const { error } = updateUserSchema.validate(req.body);
-    if (error) return res.status(400).send(error.details[0].message);
+    if (error) return res.status(400).json({ message: error.details[0].message });
 
     const userExist = await User.findById(req.params.id);
-    if (!userExist) return res.status(400).send("Invalid User");
+    if (!userExist) return res.status(400).json({ message: "Invalid User" });
 
     // SECURITY: Check if the new phone number is already taken by a different user
     if (req.body.phone && req.body.phone !== userExist.phone) {
         const phoneInUse = await User.findOne({ phone: req.body.phone, _id: { $ne: req.params.id } });
-        if (phoneInUse) return res.status(400).send("This phone number is already registered with another account.");
+        if (phoneInUse) return res.status(400).json({ message: "This phone number is already registered with another account." });
     }
 
     let newPassword = req.body.password ? bcrypt.hashSync(req.body.password, 10) : userExist.passwordHash;
@@ -345,7 +345,7 @@ router.put("/:id", async (req, res) => {
         { returnDocument: "after" }
     );
 
-    if (!user) return res.status(400).send("the user cannot be updated!");
+    if (!user) return res.status(400).json({ message: "the user cannot be updated!" });
     res.send(user);
 });
 
