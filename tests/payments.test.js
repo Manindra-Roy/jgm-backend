@@ -55,7 +55,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 user: 'user789'
             };
             orderRepository.findById.mockResolvedValue(mockOrder);
-            orderRepository.update.mockResolvedValue({ ...mockOrder, transactionId: 'JGM-9d4e5f-123456789' });
+            orderRepository.update.mockResolvedValue({ ...mockOrder, transactionId: 'JGM-9d4e5f-123456789-abcdef' });
             
             axios.post.mockResolvedValue({
                 data: {
@@ -76,7 +76,8 @@ describe('PhonePe Payments Route Integration Tests', () => {
 
             expect(orderRepository.update).toHaveBeenCalledTimes(1);
             expect(orderRepository.update.mock.calls[0][0].toString()).toBe(mockOrder._id);
-            expect(orderRepository.update.mock.calls[0][1].transactionId).toMatch(/^JGM-\w+-\d+$/);
+            // Verify JGM-{last6_order_id}-{timestamp}-{randomSuffix} format
+            expect(orderRepository.update.mock.calls[0][1].transactionId).toMatch(/^JGM-\w+-\d+-\w+$/);
 
             expect(axios.post).toHaveBeenCalledTimes(1);
             
@@ -157,7 +158,6 @@ describe('PhonePe Payments Route Integration Tests', () => {
             const responseData = {
                 code: 'PAYMENT_SUCCESS',
                 data: {
-                    // missing merchantTransactionId
                     amount: 10000
                 }
             };
@@ -216,10 +216,10 @@ describe('PhonePe Payments Route Integration Tests', () => {
 
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
-            expect(orderRepository.update).not.toHaveBeenCalled();
+            expect(orderRepository.markAsPaidIfPending).not.toHaveBeenCalled();
         });
 
-        it('should mark order as Paid, set status to Processing, and save gatewayTransactionId without modifying transactionId on success', async () => {
+        it('should mark order as Paid using markAsPaidIfPending, set status to Processing, and save gatewayTransactionId without modifying transactionId on success', async () => {
             const responseData = {
                 code: 'PAYMENT_SUCCESS',
                 data: {
@@ -235,6 +235,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 totalPrice: 100, // Rs 100
                 transactionId: 'JGM-9d4e5f-12345'
             });
+            orderRepository.markAsPaidIfPending.mockResolvedValue(true);
 
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
@@ -244,7 +245,8 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
             
-            expect(orderRepository.update).toHaveBeenCalledWith('order123', {
+            // Check that we update order successfully via the conditional helper
+            expect(orderRepository.markAsPaidIfPending).toHaveBeenCalledWith('order123', {
                 paymentStatus: 'Paid',
                 status: 'Processing',
                 gatewayTransactionId: 'T123456789'
@@ -276,7 +278,6 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
 
-            // Verify the atomic cancellation method was called
             expect(orderRepository.cancelAndRestoreStock).toHaveBeenCalledWith('order123');
         });
     });
@@ -327,7 +328,6 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 transactionId: 'JGM-9d4e5f-12345'
             });
 
-            // Simulate PhonePe gateway timeout or connectivity issue
             axios.get.mockRejectedValue(new Error('Connection timed out'));
 
             const res = await request(app).get('/api/v1/payments/check-status/order123');
@@ -338,12 +338,11 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 note: 'Gateway synchronizing state.'
             });
 
-            // Verify order was NOT cancelled
             expect(orderRepository.cancelAndRestoreStock).not.toHaveBeenCalled();
-            expect(orderRepository.update).not.toHaveBeenCalled();
+            expect(orderRepository.markAsPaidIfPending).not.toHaveBeenCalled();
         });
 
-        it('should return Paid status and save gatewayTransactionId if PhonePe responds with PAYMENT_SUCCESS', async () => {
+        it('should return Paid status and save gatewayTransactionId using markAsPaidIfPending if PhonePe responds with PAYMENT_SUCCESS', async () => {
             orderRepository.findById.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
@@ -362,7 +361,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 }
             });
 
-            orderRepository.update.mockResolvedValue({ status: 'Processing' });
+            orderRepository.markAsPaidIfPending.mockResolvedValue(true);
 
             const res = await request(app).get('/api/v1/payments/check-status/order123');
             expect(res.statusCode).toBe(200);
@@ -372,7 +371,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(axios.get.mock.calls[0][0]).toContain('/pg/v1/status/TEST_MERCHANT_ID/JGM-9d4e5f-12345');
             expect(axios.get.mock.calls[0][1].headers['X-VERIFY']).toBeDefined();
 
-            expect(orderRepository.update).toHaveBeenCalledWith('order123', {
+            expect(orderRepository.markAsPaidIfPending).toHaveBeenCalledWith('order123', {
                 paymentStatus: 'Paid',
                 status: 'Processing',
                 gatewayTransactionId: 'T987654321'
@@ -397,7 +396,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
             const res = await request(app).get('/api/v1/payments/check-status/order123');
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual({ paymentStatus: 'Pending', orderStatus: 'Pending' });
-            expect(orderRepository.update).not.toHaveBeenCalled();
+            expect(orderRepository.markAsPaidIfPending).not.toHaveBeenCalled();
         });
 
         it('should restore stock atomically and set Failed/Cancelled if PhonePe responds with failure code', async () => {

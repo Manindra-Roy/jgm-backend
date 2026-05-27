@@ -28,17 +28,18 @@ if (!MERCHANT_ID || !SALT_KEY) {
 
 const isProd = process.env.PHONEPE_ENV === 'PROD';
 
-// FIX: Define endpoint paths dynamically to maintain cryptographic alignment with PhonePe's load balancers
-const PAY_ENDPOINT = isProd ? "/hermes/pg/v1/pay" : "/pg/v1/pay";
-const STATUS_ENDPOINT_PREFIX = isProd ? "/hermes/pg/v1/status" : "/pg/v1/status";
+// Documented paths used for SHA256 checksum generation
+const PAY_API_PATH = "/pg/v1/pay";
+const STATUS_API_PATH_PREFIX = "/pg/v1/status";
 
+// Outbound endpoint URLs matching PhonePe's gateway load balancers
 const PHONEPE_URL = isProd 
-    ? `https://api.phonepe.com/apis${PAY_ENDPOINT}`              
-    : `https://api-preprod.phonepe.com/apis/pg-sandbox${PAY_ENDPOINT}`; 
+    ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"              
+    : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/pay"; 
 
 const PHONEPE_STATUS_URL = isProd
-    ? `https://api.phonepe.com/apis${STATUS_ENDPOINT_PREFIX}`
-    : `https://api-preprod.phonepe.com/apis/pg-sandbox${STATUS_ENDPOINT_PREFIX}`;
+    ? "https://api.phonepe.com/apis/hermes/pg/v1/status"
+    : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/status";
 
 const initiatePayment = async (orderId) => {
     const order = await orderRepository.findById(orderId);
@@ -53,7 +54,8 @@ const initiatePayment = async (orderId) => {
     }
 
     const amountInPaise = Math.round(order.totalPrice * 100);
-    const merchantTransactionId = `JGM-${order._id.toString().slice(-6)}-${Date.now()}`;
+    const randomPart = crypto.randomBytes(4).toString("hex");
+    const merchantTransactionId = `JGM-${order._id.toString().slice(-6)}-${Date.now()}-${randomPart}`;
 
     // Mutate state prior to remote request execution to completely mitigate webhook timing issues
     await orderRepository.update(order._id, { transactionId: merchantTransactionId });
@@ -71,8 +73,8 @@ const initiatePayment = async (orderId) => {
 
     const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
     
-    // FIX: Using dynamic endpoint matching criteria to align with gateway environments
-    const stringToHash = base64Payload + PAY_ENDPOINT + SALT_KEY;
+    // Hash using the standard documented endpoint suffix to align with PhonePe checksum verification
+    const stringToHash = base64Payload + PAY_API_PATH + SALT_KEY;
     const checksum = crypto.createHash("sha256").update(stringToHash).digest("hex") + "###" + SALT_INDEX;
 
     const response = await axios.post(PHONEPE_URL, { request: base64Payload }, {
@@ -150,7 +152,7 @@ router.post("/webhook", async (req, res) => {
 
         const expectedAmount = Math.round(order.totalPrice * 100);
         if (responseData.code === "PAYMENT_SUCCESS" && responseData.data?.amount === expectedAmount) {
-            await orderRepository.update(order._id, {
+            await orderRepository.markAsPaidIfPending(order._id, {
                 paymentStatus: "Paid",
                 status: "Processing",
                 gatewayTransactionId: responseData.data.transactionId
@@ -180,8 +182,8 @@ router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
             return res.json({ paymentStatus: "Failed", orderStatus: "Cancelled" });
         }
 
-        // FIX: Construct the status lookup string with the matching environment endpoint prefix
-        const statusPath = `${STATUS_ENDPOINT_PREFIX}/${MERCHANT_ID}/${order.transactionId}`;
+        // Construct the status lookup path using standard documented suffix prefix
+        const statusPath = `${STATUS_API_PATH_PREFIX}/${MERCHANT_ID}/${order.transactionId}`;
         const checksum = crypto.createHash("sha256").update(statusPath + SALT_KEY).digest("hex") + "###" + SALT_INDEX;
 
         let response;
@@ -199,12 +201,12 @@ router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
         const expectedAmount = Math.round(order.totalPrice * 100);
 
         if (phonepeStatus === "PAYMENT_SUCCESS" && response.data?.data?.amount === expectedAmount) {
-            const updated = await orderRepository.update(order._id, {
+            await orderRepository.markAsPaidIfPending(order._id, {
                 paymentStatus: "Paid",
                 status: "Processing",
                 gatewayTransactionId: response.data.data.transactionId || null
             });
-            return res.json({ paymentStatus: "Paid", orderStatus: updated.status });
+            return res.json({ paymentStatus: "Paid", orderStatus: "Processing" });
         } else if (phonepeStatus === "PAYMENT_PENDING") {
             return res.json({ paymentStatus: "Pending", orderStatus: order.status });
         } else {
@@ -230,9 +232,13 @@ const cleanup = async () => {
     }
 };
 
+const runCleanup = async () => {
+    await cleanup().catch(() => {});
+    setTimeout(runCleanup, CLEANUP_INTERVAL_MS);
+};
+
 if (process.env.NODE_ENV !== 'test') {
-    setInterval(cleanup, CLEANUP_INTERVAL_MS);
-    setTimeout(cleanup, 10000);
+    setTimeout(runCleanup, 10000);
 }
 
 module.exports = router;
