@@ -28,18 +28,18 @@ if (!MERCHANT_ID || !SALT_KEY) {
 
 const isProd = process.env.PHONEPE_ENV === 'PROD';
 
-// Documented paths used for SHA256 checksum generation
-const PAY_API_PATH = "/pg/v1/pay";
-const STATUS_API_PATH_PREFIX = "/pg/v1/status";
+// FIX: Dynamically derive paths to ensure cryptographic alignment with PhonePe's load balancers
+const PAY_API_PATH = isProd ? "/hermes/pg/v1/pay" : "/pg/v1/pay";
+const STATUS_API_PATH_PREFIX = isProd ? "/hermes/pg/v1/status" : "/pg/v1/status";
 
-// Outbound endpoint URLs matching PhonePe's gateway load balancers
+// Outbound endpoint URLs constructed reliably using unified route path constants
 const PHONEPE_URL = isProd 
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"              
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/pay"; 
+    ? `https://api.phonepe.com/apis${PAY_API_PATH}`                  
+    : `https://api-preprod.phonepe.com/apis/pg-sandbox${PAY_API_PATH}`; 
 
 const PHONEPE_STATUS_URL = isProd
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/status"
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/status";
+    ? `https://api.phonepe.com/apis${STATUS_API_PATH_PREFIX}`
+    : `https://api-preprod.phonepe.com/apis/pg-sandbox${STATUS_API_PATH_PREFIX}`;
 
 const initiatePayment = async (orderId) => {
     const order = await orderRepository.findById(orderId);
@@ -73,7 +73,7 @@ const initiatePayment = async (orderId) => {
 
     const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
     
-    // Hash using the standard documented endpoint suffix to align with PhonePe checksum verification
+    // FIX: Using runtime-safe dynamic endpoint tokens for production stability
     const stringToHash = base64Payload + PAY_API_PATH + SALT_KEY;
     const checksum = crypto.createHash("sha256").update(stringToHash).digest("hex") + "###" + SALT_INDEX;
 
@@ -182,7 +182,7 @@ router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
             return res.json({ paymentStatus: "Failed", orderStatus: "Cancelled" });
         }
 
-        // Construct the status lookup path using standard documented suffix prefix
+        // FIX: Build path prefix dynamically to account for live traffic cluster names
         const statusPath = `${STATUS_API_PATH_PREFIX}/${MERCHANT_ID}/${order.transactionId}`;
         const checksum = crypto.createHash("sha256").update(statusPath + SALT_KEY).digest("hex") + "###" + SALT_INDEX;
 
