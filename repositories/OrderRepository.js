@@ -217,14 +217,11 @@ class OrderRepository {
         return processedCount;
     }
 
-    /**
-     * Conditionally updates an order as paid only if it is not already in a terminal state (Paid or Failed).
-     */
     async markAsPaidIfPending(orderId, updates) {
         const result = await Order.updateOne(
             { 
                 _id: orderId, 
-                paymentStatus: { $nin: ["Paid", "Failed"] } 
+                paymentStatus: "Pending"
             },
             { $set: updates }
         );
