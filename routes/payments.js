@@ -7,7 +7,16 @@ const express = require("express");
 const router = express.Router();
 const crypto = require("crypto");
 const axios = require("axios");
+const rateLimit = require("express-rate-limit");
 const orderRepository = require("../repositories/OrderRepository");
+
+// Guard the status route against client polling flooding (e.g. max 5 requests per 10 seconds)
+const statusLimiter = rateLimit({
+    windowMs: 10 * 1000, // 10 seconds sliding window
+    max: 5, // Limit each IP to 5 requests per window
+    message: { message: "Too many status checks, please wait a few seconds before trying again." },
+    skip: () => process.env.NODE_ENV === 'test' // Skip rate limiting during automated testing
+});
 
 const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
 const SALT_KEY = process.env.PHONEPE_SALT_KEY;
@@ -151,7 +160,7 @@ router.post("/webhook", async (req, res) => {
     }
 });
 
-router.get("/check-status/:orderId", async (req, res) => {
+router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
     try {
         const order = await orderRepository.findById(req.params.orderId);
         if (!order) return res.status(404).json({ message: "Order not found" });
