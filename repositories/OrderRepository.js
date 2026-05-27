@@ -80,8 +80,7 @@ class OrderRepository {
         const order = await Order.findOneAndUpdate(
             { 
                 _id: orderId, 
-                isStockRestored: false,
-                status: { $ne: 'Cancelled' } 
+                isStockRestored: false
             },
             { $set: { isStockRestored: true } },
             { returnDocument: 'after' }
@@ -99,6 +98,36 @@ class OrderRepository {
         });
 
         await Promise.all(restorationPromises);
+        return true;
+    }
+
+    /**
+     * Cancel an order and restore stock atomically.
+     * Ensures inventory is only restored once.
+     */
+    async cancelAndRestoreStock(orderId) {
+        // Atomic update: only update if status is not already Cancelled
+        const order = await Order.findOneAndUpdate(
+            {
+                _id: orderId,
+                status: { $ne: "Cancelled" }
+            },
+            {
+                $set: {
+                    status: "Cancelled",
+                    paymentStatus: "Failed"
+                }
+            },
+            { returnDocument: "after" }
+        );
+
+        if (!order) {
+            // Already cancelled, or order doesn't exist.
+            return false;
+        }
+
+        // Now restore stock (which is also gated by isStockRestored: false)
+        await this.restoreStock(orderId);
         return true;
     }
 
@@ -177,11 +206,8 @@ class OrderRepository {
         let processedCount = 0;
         for (const order of staleOrders) {
             try {
-                const restored = await this.restoreStock(order._id);
-                if (restored) {
-                    order.paymentStatus = "Failed";
-                    order.status = "Cancelled";
-                    await order.save();
+                const cancelled = await this.cancelAndRestoreStock(order._id);
+                if (cancelled) {
                     processedCount++;
                 }
             } catch (err) {

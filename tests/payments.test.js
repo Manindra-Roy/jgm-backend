@@ -74,14 +74,12 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.body.success).toBe(true);
             expect(res.body.paymentUrl).toBe('https://phonepe.com/mock-redirect');
 
-            // Verify orderRepository.update was called with transactionId prefix before axios.post
             expect(orderRepository.update).toHaveBeenCalledTimes(1);
             expect(orderRepository.update.mock.calls[0][0].toString()).toBe(mockOrder._id);
             expect(orderRepository.update.mock.calls[0][1].transactionId).toMatch(/^JGM-\w+-\d+$/);
 
             expect(axios.post).toHaveBeenCalledTimes(1);
             
-            // Check that DB update happened before PhonePe API post
             const updateCallOrder = orderRepository.update.mock.invocationCallOrder[0];
             const axiosPostCallOrder = axios.post.mock.invocationCallOrder[0];
             expect(updateCallOrder).toBeLessThan(axiosPostCallOrder);
@@ -123,6 +121,14 @@ describe('PhonePe Payments Route Integration Tests', () => {
             return { base64Response, checksum };
         };
 
+        it('should return 400 for missing header or body', async () => {
+            const res = await request(app)
+                .post('/api/v1/payments/webhook')
+                .send({});
+            expect(res.statusCode).toBe(400);
+            expect(res.text).toBe('Missing payload requirements');
+        });
+
         it('should return 400 for invalid checksums', async () => {
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
@@ -131,6 +137,39 @@ describe('PhonePe Payments Route Integration Tests', () => {
             
             expect(res.statusCode).toBe(400);
             expect(res.text).toBe('Invalid Checksum');
+        });
+
+        it('should return 400 for malformed base64 JSON payload structurally invalid', async () => {
+            const malformedBase64 = Buffer.from("{invalid-json").toString('base64');
+            const stringToHash = malformedBase64 + 'TEST_SALT_KEY';
+            const checksum = crypto.createHash('sha256').update(stringToHash).digest('hex') + '###' + '1';
+
+            const res = await request(app)
+                .post('/api/v1/payments/webhook')
+                .set('x-verify', checksum)
+                .send({ response: malformedBase64 });
+
+            expect(res.statusCode).toBe(400);
+            expect(res.text).toBe('Malformed Base64 JSON Payload structurally invalid');
+        });
+
+        it('should return 400 if merchantTransactionId is missing in response JSON', async () => {
+            const responseData = {
+                code: 'PAYMENT_SUCCESS',
+                data: {
+                    // missing merchantTransactionId
+                    amount: 10000
+                }
+            };
+            const { base64Response, checksum } = generateWebhookPayload(responseData, 'TEST_SALT_KEY', '1');
+
+            const res = await request(app)
+                .post('/api/v1/payments/webhook')
+                .set('x-verify', checksum)
+                .send({ response: base64Response });
+
+            expect(res.statusCode).toBe(400);
+            expect(res.text).toBe('Missing Identification parameter context');
         });
 
         it('should return 404 if order associated with merchantTransactionId is not found', async () => {
@@ -151,7 +190,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 .send({ response: base64Response });
 
             expect(res.statusCode).toBe(404);
-            expect(res.text).toBe('Order not found');
+            expect(res.text).toBe('Order reference pointer mismatch');
         });
 
         it('should return 200 OK immediately if order is already Paid', async () => {
@@ -205,7 +244,6 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
             
-            // Check that we update order successfully and supply the gatewayTransactionId distinctly
             expect(orderRepository.update).toHaveBeenCalledWith('order123', {
                 paymentStatus: 'Paid',
                 status: 'Processing',
@@ -213,7 +251,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
             });
         });
 
-        it('should restore stock and set order as Failed/Cancelled if response indicates failure and order status is not Cancelled', async () => {
+        it('should atomically cancel and restore stock if response indicates failure', async () => {
             const responseData = {
                 code: 'PAYMENT_ERROR',
                 data: {
@@ -238,44 +276,8 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
 
-            // Verify stock was restored since order status was not Cancelled
-            expect(orderRepository.restoreStock).toHaveBeenCalledWith('order123');
-            expect(orderRepository.update).toHaveBeenCalledWith('order123', {
-                paymentStatus: 'Failed',
-                status: 'Cancelled'
-            });
-        });
-
-        it('should NOT restore stock if order status is already Cancelled', async () => {
-            const responseData = {
-                code: 'PAYMENT_ERROR',
-                data: {
-                    merchantTransactionId: 'JGM-9d4e5f-12345',
-                    amount: 10000,
-                    transactionId: 'T123456789'
-                }
-            };
-            const { base64Response, checksum } = generateWebhookPayload(responseData, 'TEST_SALT_KEY', '1');
-            orderRepository.findByTransactionId.mockResolvedValue({
-                _id: 'order123',
-                paymentStatus: 'Pending',
-                totalPrice: 100,
-                status: 'Cancelled'
-            });
-
-            const res = await request(app)
-                .post('/api/v1/payments/webhook')
-                .set('x-verify', checksum)
-                .send({ response: base64Response });
-
-            expect(res.statusCode).toBe(200);
-
-            // Verify stock restoration was skipped to protect inventory integrity
-            expect(orderRepository.restoreStock).not.toHaveBeenCalled();
-            expect(orderRepository.update).toHaveBeenCalledWith('order123', {
-                paymentStatus: 'Failed',
-                status: 'Cancelled'
-            });
+            // Verify the atomic cancellation method was called
+            expect(orderRepository.cancelAndRestoreStock).toHaveBeenCalledWith('order123');
         });
     });
 
@@ -301,24 +303,44 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(axios.get).not.toHaveBeenCalled();
         });
 
-        it('should cancel order and restore stock if order has no transactionId (never checkout out properly) and status !== Cancelled', async () => {
+        it('should cancel order and restore stock atomically if order has no transactionId', async () => {
             orderRepository.findById.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
                 status: 'Pending',
                 transactionId: null
             });
-            orderRepository.update.mockResolvedValue({ status: 'Cancelled' });
 
             const res = await request(app).get('/api/v1/payments/check-status/order123');
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual({ paymentStatus: 'Failed', orderStatus: 'Cancelled' });
 
-            expect(orderRepository.restoreStock).toHaveBeenCalledWith('order123');
-            expect(orderRepository.update).toHaveBeenCalledWith('order123', {
-                paymentStatus: 'Failed',
-                status: 'Cancelled'
+            expect(orderRepository.cancelAndRestoreStock).toHaveBeenCalledWith('order123');
+        });
+
+        it('should catch Axios exceptions gracefully and return Pending status without canceling the order', async () => {
+            orderRepository.findById.mockResolvedValue({
+                _id: 'order123',
+                paymentStatus: 'Pending',
+                totalPrice: 200,
+                status: 'Pending',
+                transactionId: 'JGM-9d4e5f-12345'
             });
+
+            // Simulate PhonePe gateway timeout or connectivity issue
+            axios.get.mockRejectedValue(new Error('Connection timed out'));
+
+            const res = await request(app).get('/api/v1/payments/check-status/order123');
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual({
+                paymentStatus: 'Pending',
+                orderStatus: 'Pending',
+                note: 'Gateway synchronizing state.'
+            });
+
+            // Verify order was NOT cancelled
+            expect(orderRepository.cancelAndRestoreStock).not.toHaveBeenCalled();
+            expect(orderRepository.update).not.toHaveBeenCalled();
         });
 
         it('should return Paid status and save gatewayTransactionId if PhonePe responds with PAYMENT_SUCCESS', async () => {
@@ -346,12 +368,10 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual({ paymentStatus: 'Paid', orderStatus: 'Processing' });
 
-            // Verify axios check-status headers and signature
             expect(axios.get).toHaveBeenCalledTimes(1);
             expect(axios.get.mock.calls[0][0]).toContain('/pg/v1/status/TEST_MERCHANT_ID/JGM-9d4e5f-12345');
             expect(axios.get.mock.calls[0][1].headers['X-VERIFY']).toBeDefined();
 
-            // Verify we update the correct order fields and do NOT overwrite the lookup transactionId
             expect(orderRepository.update).toHaveBeenCalledWith('order123', {
                 paymentStatus: 'Paid',
                 status: 'Processing',
@@ -380,7 +400,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(orderRepository.update).not.toHaveBeenCalled();
         });
 
-        it('should restore stock and set Failed/Cancelled if PhonePe responds with failure code and status is not Cancelled', async () => {
+        it('should restore stock atomically and set Failed/Cancelled if PhonePe responds with failure code', async () => {
             orderRepository.findById.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
@@ -396,47 +416,11 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 }
             });
 
-            orderRepository.update.mockResolvedValue({ status: 'Cancelled' });
-
             const res = await request(app).get('/api/v1/payments/check-status/order123');
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual({ paymentStatus: 'Failed', orderStatus: 'Cancelled' });
 
-            expect(orderRepository.restoreStock).toHaveBeenCalledWith('order123');
-            expect(orderRepository.update).toHaveBeenCalledWith('order123', {
-                paymentStatus: 'Failed',
-                status: 'Cancelled'
-            });
-        });
-
-        it('should NOT restore stock if PhonePe responds with failure code but order status is already Cancelled', async () => {
-            orderRepository.findById.mockResolvedValue({
-                _id: 'order123',
-                paymentStatus: 'Pending',
-                totalPrice: 200,
-                status: 'Cancelled',
-                transactionId: 'JGM-9d4e5f-12345'
-            });
-
-            axios.get.mockResolvedValue({
-                data: {
-                    code: 'PAYMENT_ERROR',
-                    data: {}
-                }
-            });
-
-            orderRepository.update.mockResolvedValue({ status: 'Cancelled' });
-
-            const res = await request(app).get('/api/v1/payments/check-status/order123');
-            expect(res.statusCode).toBe(200);
-            expect(res.body).toEqual({ paymentStatus: 'Failed', orderStatus: 'Cancelled' });
-
-            // Verify stock restore skipped
-            expect(orderRepository.restoreStock).not.toHaveBeenCalled();
-            expect(orderRepository.update).toHaveBeenCalledWith('order123', {
-                paymentStatus: 'Failed',
-                status: 'Cancelled'
-            });
+            expect(orderRepository.cancelAndRestoreStock).toHaveBeenCalledWith('order123');
         });
     });
 });
