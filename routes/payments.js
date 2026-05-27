@@ -1,6 +1,6 @@
 /**
  * @fileoverview Payment Gateway Routes.
- * Production-hardened implementation with error isolation, robust error handling, and atomic database transitions.
+ * Production-hardened implementation with dynamic cryptographic routing validation.
  */
 
 const express = require("express");
@@ -27,13 +27,18 @@ if (!MERCHANT_ID || !SALT_KEY) {
 }
 
 const isProd = process.env.PHONEPE_ENV === 'PROD';
+
+// FIX: Define endpoint paths dynamically to maintain cryptographic alignment with PhonePe's load balancers
+const PAY_ENDPOINT = isProd ? "/hermes/pg/v1/pay" : "/pg/v1/pay";
+const STATUS_ENDPOINT_PREFIX = isProd ? "/hermes/pg/v1/status" : "/pg/v1/status";
+
 const PHONEPE_URL = isProd 
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"              
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/pay"; 
+    ? `https://api.phonepe.com/apis${PAY_ENDPOINT}`              
+    : `https://api-preprod.phonepe.com/apis/pg-sandbox${PAY_ENDPOINT}`; 
 
 const PHONEPE_STATUS_URL = isProd
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/status"
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/status";
+    ? `https://api.phonepe.com/apis${STATUS_ENDPOINT_PREFIX}`
+    : `https://api-preprod.phonepe.com/apis/pg-sandbox${STATUS_ENDPOINT_PREFIX}`;
 
 const initiatePayment = async (orderId) => {
     const order = await orderRepository.findById(orderId);
@@ -65,7 +70,9 @@ const initiatePayment = async (orderId) => {
     };
 
     const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-    const stringToHash = base64Payload + "/pg/v1/pay" + SALT_KEY;
+    
+    // FIX: Using dynamic endpoint matching criteria to align with gateway environments
+    const stringToHash = base64Payload + PAY_ENDPOINT + SALT_KEY;
     const checksum = crypto.createHash("sha256").update(stringToHash).digest("hex") + "###" + SALT_INDEX;
 
     const response = await axios.post(PHONEPE_URL, { request: base64Payload }, {
@@ -149,7 +156,6 @@ router.post("/webhook", async (req, res) => {
                 gatewayTransactionId: responseData.data.transactionId
             });
         } else if (responseData.code !== "PAYMENT_PENDING") {
-            // Atomic cancellation and stock restoration to eliminate distributed race conditions
             await orderRepository.cancelAndRestoreStock(order._id);
         }
 
@@ -174,7 +180,8 @@ router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
             return res.json({ paymentStatus: "Failed", orderStatus: "Cancelled" });
         }
 
-        const statusPath = `/pg/v1/status/${MERCHANT_ID}/${order.transactionId}`;
+        // FIX: Construct the status lookup string with the matching environment endpoint prefix
+        const statusPath = `${STATUS_ENDPOINT_PREFIX}/${MERCHANT_ID}/${order.transactionId}`;
         const checksum = crypto.createHash("sha256").update(statusPath + SALT_KEY).digest("hex") + "###" + SALT_INDEX;
 
         let response;
@@ -184,7 +191,6 @@ router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
                 timeout: 8000
             });
         } catch (axiosError) {
-            // Handle network timeouts or temporary 404/500 errors from PhonePe gracefully without canceling the order
             console.warn(`⚠️ PhonePe Status API connection warning: ${axiosError.message}`);
             return res.json({ paymentStatus: "Pending", orderStatus: order.status, note: "Gateway synchronizing state." });
         }
