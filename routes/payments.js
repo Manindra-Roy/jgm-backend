@@ -28,11 +28,11 @@ if (!MERCHANT_ID || !SALT_KEY) {
 
 const isProd = process.env.PHONEPE_ENV === 'PROD';
 const PHONEPE_URL = isProd 
-    ? "https://api.phonepe.com/apis/pg/v1/pay"              
+    ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"              
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/pay"; 
 
 const PHONEPE_STATUS_URL = isProd
-    ? "https://api.phonepe.com/apis/pg/v1/status"
+    ? "https://api.phonepe.com/apis/hermes/pg/v1/status"
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/status";
 
 const initiatePayment = async (orderId) => {
