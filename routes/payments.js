@@ -1,6 +1,6 @@
 /**
- * @fileoverview Payment Gateway Routes.
- * Production-hardened implementation with dynamic cryptographic routing validation.
+ * @fileoverview Payment Gateway Routes (PhonePe V2 Checkout API).
+ * Production-hardened implementation with OAuth2 dynamic access token caching and verification.
  */
 
 const express = require("express");
@@ -18,28 +18,57 @@ const statusLimiter = rateLimit({
     skip: () => process.env.NODE_ENV === 'test' // Skip rate limiting during automated testing
 });
 
-const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
-const SALT_KEY = process.env.PHONEPE_SALT_KEY;
-const SALT_INDEX = process.env.PHONEPE_SALT_INDEX || "1";
+const CLIENT_ID = process.env.PHONEPE_MERCHANT_ID;
+const CLIENT_SECRET = process.env.PHONEPE_SALT_KEY;
+const CLIENT_VERSION = process.env.PHONEPE_SALT_INDEX || "1";
+const WEBHOOK_USERNAME = process.env.PHONEPE_WEBHOOK_USERNAME;
+const WEBHOOK_PASSWORD = process.env.PHONEPE_WEBHOOK_PASSWORD;
 
-if (!MERCHANT_ID || !SALT_KEY) {
-    console.error("❌ CRITICAL: PhonePe environment configurations are missing!");
+if (!CLIENT_ID || !CLIENT_SECRET) {
+    console.error("❌ CRITICAL: PhonePe Client ID or Client Secret (environment configurations) are missing!");
 }
 
-const isProd = process.env.PHONEPE_ENV === 'PROD';
+// Dynamic environment evaluation to support test environment isolation
+const isProd = () => process.env.PHONEPE_ENV === 'PROD';
 
-// FIX: Dynamically derive paths to ensure cryptographic alignment with PhonePe's load balancers
-const PAY_API_PATH = isProd ? "/hermes/pg/v1/pay" : "/pg/v1/pay";
-const STATUS_API_PATH_PREFIX = isProd ? "/hermes/pg/v1/status" : "/pg/v1/status";
+// OAuth Access Token Caching logic
+let cachedToken = null;
+let tokenExpiresAt = 0; // Epoch seconds
 
-// Outbound endpoint URLs constructed reliably using unified route path constants
-const PHONEPE_URL = isProd 
-    ? `https://api.phonepe.com/apis${PAY_API_PATH}`                  
-    : `https://api-preprod.phonepe.com/apis/pg-sandbox${PAY_API_PATH}`; 
+const getAccessToken = async () => {
+    const now = Math.floor(Date.now() / 1000);
+    // Use cached token if it exists and has at least 60 seconds of validity remaining
+    if (cachedToken && tokenExpiresAt > now + 60) {
+        return cachedToken;
+    }
 
-const PHONEPE_STATUS_URL = isProd
-    ? `https://api.phonepe.com/apis${STATUS_API_PATH_PREFIX}`
-    : `https://api-preprod.phonepe.com/apis/pg-sandbox${STATUS_API_PATH_PREFIX}`;
+    const authUrl = isProd()
+        ? "https://api.phonepe.com/apis/identity-manager/v1/oauth/token"
+        : "https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token";
+
+    const params = new URLSearchParams();
+    params.append("client_id", CLIENT_ID);
+    params.append("client_version", CLIENT_VERSION);
+    params.append("client_secret", CLIENT_SECRET);
+    params.append("grant_type", "client_credentials");
+
+    const response = await axios.post(authUrl, params.toString(), {
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        timeout: 10000
+    });
+
+    const data = response.data;
+    if (!data.access_token) {
+        throw new Error("Failed to obtain access token from PhonePe");
+    }
+
+    cachedToken = data.access_token;
+    // Set expiry timestamp (default to 1 hour from now if not explicitly provided)
+    tokenExpiresAt = data.expires_at || (now + 3600);
+    return cachedToken;
+};
 
 const initiatePayment = async (orderId) => {
     const order = await orderRepository.findById(orderId);
@@ -60,37 +89,38 @@ const initiatePayment = async (orderId) => {
     // Mutate state prior to remote request execution to completely mitigate webhook timing issues
     await orderRepository.update(order._id, { transactionId: merchantTransactionId });
 
+    const token = await getAccessToken();
+
     const payload = {
-        merchantId: MERCHANT_ID,
-        merchantTransactionId: merchantTransactionId,
-        merchantUserId: order.user ? (order.user._id ? order.user._id.toString() : order.user.toString()) : "GUEST-USER",
+        merchantOrderId: merchantTransactionId,
         amount: amountInPaise,
-        redirectUrl: `${process.env.FRONTEND_URL}/payment-success/${order._id}`, 
-        redirectMode: "REDIRECT",
-        callbackUrl: process.env.PHONEPE_WEBHOOK_URL, 
-        paymentInstrument: { type: "PAY_PAGE" },
+        expireAfter: 1200,
+        paymentFlow: {
+            type: "PG_CHECKOUT",
+            merchantUrls: {
+                redirectUrl: `${process.env.FRONTEND_URL}/payment-success/${order._id}`
+            }
+        }
     };
 
-    const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-    
-    // FIX: Using runtime-safe dynamic endpoint tokens for production stability
-    const stringToHash = base64Payload + PAY_API_PATH + SALT_KEY;
-    const checksum = crypto.createHash("sha256").update(stringToHash).digest("hex") + "###" + SALT_INDEX;
+    const checkoutUrl = isProd()
+        ? "https://api.phonepe.com/apis/pg/checkout/v2/pay"
+        : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay";
 
-    const response = await axios.post(PHONEPE_URL, { request: base64Payload }, {
+    const response = await axios.post(checkoutUrl, payload, {
         headers: {
             "Content-Type": "application/json",
-            "X-VERIFY": checksum,
-            "Accept": "application/json",
+            "Authorization": `O-Bearer ${token}`,
+            "Accept": "application/json"
         },
-        timeout: 10000 // Mitigate infinite thread hanging
+        timeout: 10000
     });
 
-    if (!response.data?.data?.instrumentResponse?.redirectInfo?.url) {
+    if (!response.data?.redirectUrl) {
         throw new Error("Invalid malformed structural mapping returned from gateway API.");
     }
 
-    return response.data.data.instrumentResponse.redirectInfo.url;
+    return response.data.redirectUrl;
 };
 
 router.post("/checkout/:orderId", async (req, res) => {
@@ -121,26 +151,32 @@ router.get("/checkout/:orderId", async (req, res) => {
 
 router.post("/webhook", async (req, res) => {
     try {
-        const receivedChecksum = req.headers['x-verify'];
-        const base64Response = req.body?.response;
+        const authHeader = req.headers['authorization'];
 
-        if (!receivedChecksum || !base64Response) {
+        if (!authHeader) {
+            return res.status(401).send("Missing payload authentication credentials");
+        }
+
+        // Construct expected auth using SHA256 of username:password
+        const credentials = `${WEBHOOK_USERNAME}:${WEBHOOK_PASSWORD}`;
+        const expectedAuth = crypto.createHash("sha256").update(credentials).digest("hex");
+
+        // Verify hash matches exactly (handles direct hash or format containing hash)
+        const isMatch = authHeader.toLowerCase() === expectedAuth.toLowerCase() ||
+                        authHeader.toLowerCase().includes(expectedAuth.toLowerCase());
+
+        if (!isMatch) {
+            return res.status(401).send("Invalid Webhook Authentication Signature");
+        }
+
+        const event = req.body?.event;
+        const payload = req.body?.payload;
+
+        if (!event || !payload) {
             return res.status(400).send("Missing payload requirements");
         }
 
-        const stringToHash = base64Response + SALT_KEY;
-        const expectedChecksum = crypto.createHash("sha256").update(stringToHash).digest("hex") + "###" + SALT_INDEX;
-
-        if (receivedChecksum !== expectedChecksum) return res.status(400).send("Invalid Checksum");
-
-        let responseData;
-        try {
-            responseData = JSON.parse(Buffer.from(base64Response, "base64").toString("utf8"));
-        } catch (parseError) {
-            return res.status(400).send("Malformed Base64 JSON Payload structurally invalid");
-        }
-
-        const merchantTxnId = responseData?.data?.merchantTransactionId;
+        const merchantTxnId = payload.merchantOrderId;
         if (!merchantTxnId) return res.status(400).send("Missing Identification parameter context");
 
         const order = await orderRepository.findByTransactionId(merchantTxnId);
@@ -151,13 +187,13 @@ router.post("/webhook", async (req, res) => {
         }
 
         const expectedAmount = Math.round(order.totalPrice * 100);
-        if (responseData.code === "PAYMENT_SUCCESS" && responseData.data?.amount === expectedAmount) {
+        if (event === "checkout.order.completed" && payload.state === "COMPLETED" && payload.amount === expectedAmount) {
             await orderRepository.markAsPaidIfPending(order._id, {
                 paymentStatus: "Paid",
                 status: "Processing",
-                gatewayTransactionId: responseData.data.transactionId
+                gatewayTransactionId: payload.orderId
             });
-        } else if (responseData.code !== "PAYMENT_PENDING") {
+        } else if (event === "checkout.order.failed" || (payload.state && payload.state !== "PENDING" && payload.state !== "COMPLETED")) {
             await orderRepository.cancelAndRestoreStock(order._id);
         }
 
@@ -182,14 +218,19 @@ router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
             return res.json({ paymentStatus: "Failed", orderStatus: "Cancelled" });
         }
 
-        // FIX: Build path prefix dynamically to account for live traffic cluster names
-        const statusPath = `${STATUS_API_PATH_PREFIX}/${MERCHANT_ID}/${order.transactionId}`;
-        const checksum = crypto.createHash("sha256").update(statusPath + SALT_KEY).digest("hex") + "###" + SALT_INDEX;
+        const token = await getAccessToken();
+
+        const statusBaseUrl = isProd()
+            ? "https://api.phonepe.com/apis/pg/checkout/v2/order"
+            : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/order";
 
         let response;
         try {
-            response = await axios.get(`${PHONEPE_STATUS_URL}/${MERCHANT_ID}/${order.transactionId}`, {
-                headers: { "X-VERIFY": checksum, "X-MERCHANT-ID": MERCHANT_ID },
+            response = await axios.get(`${statusBaseUrl}/${order.transactionId}/status`, {
+                headers: {
+                    "Authorization": `O-Bearer ${token}`,
+                    "Accept": "application/json"
+                },
                 timeout: 8000
             });
         } catch (axiosError) {
@@ -197,17 +238,17 @@ router.get("/check-status/:orderId", statusLimiter, async (req, res) => {
             return res.json({ paymentStatus: "Pending", orderStatus: order.status, note: "Gateway synchronizing state." });
         }
 
-        const phonepeStatus = response.data?.code;
+        const state = response.data?.state;
         const expectedAmount = Math.round(order.totalPrice * 100);
 
-        if (phonepeStatus === "PAYMENT_SUCCESS" && response.data?.data?.amount === expectedAmount) {
+        if (state === "COMPLETED" && response.data?.amount === expectedAmount) {
             await orderRepository.markAsPaidIfPending(order._id, {
                 paymentStatus: "Paid",
                 status: "Processing",
-                gatewayTransactionId: response.data.data.transactionId || null
+                gatewayTransactionId: response.data.orderId || null
             });
             return res.json({ paymentStatus: "Paid", orderStatus: "Processing" });
-        } else if (phonepeStatus === "PAYMENT_PENDING") {
+        } else if (state === "PENDING") {
             return res.json({ paymentStatus: "Pending", orderStatus: order.status });
         } else {
             await orderRepository.cancelAndRestoreStock(order._id);
@@ -239,6 +280,14 @@ const runCleanup = async () => {
 
 if (process.env.NODE_ENV !== 'test') {
     setTimeout(runCleanup, 10000);
+}
+
+// Expose reset token cache helper for testing
+if (process.env.NODE_ENV === 'test') {
+    router.clearTokenCache = () => {
+        cachedToken = null;
+        tokenExpiresAt = 0;
+    };
 }
 
 module.exports = router;

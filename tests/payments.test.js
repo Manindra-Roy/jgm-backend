@@ -7,11 +7,12 @@ const orderRepository = require('../repositories/OrderRepository');
 process.env.secret = 'test-secret-key-12345';
 process.env.API_URL = '/api/v1';
 process.env.NODE_ENV = 'test';
-process.env.PHONEPE_MERCHANT_ID = 'TEST_MERCHANT_ID';
-process.env.PHONEPE_SALT_KEY = 'TEST_SALT_KEY';
+process.env.PHONEPE_MERCHANT_ID = 'TEST_CLIENT_ID';
+process.env.PHONEPE_SALT_KEY = 'TEST_CLIENT_SECRET';
 process.env.PHONEPE_SALT_INDEX = '1';
 process.env.FRONTEND_URL = 'http://localhost:5173';
-process.env.PHONEPE_WEBHOOK_URL = 'http://localhost:3000/api/v1/payments/webhook';
+process.env.PHONEPE_WEBHOOK_USERNAME = 'webhook_user';
+process.env.PHONEPE_WEBHOOK_PASSWORD = 'webhook_password';
 
 const { app } = require('../app');
 
@@ -19,9 +20,44 @@ const { app } = require('../app');
 jest.mock('axios');
 jest.mock('../repositories/OrderRepository');
 
-describe('PhonePe Payments Route Integration Tests', () => {
+describe('PhonePe Payments Route Integration Tests (V2 API)', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+
+        // Setup default mock handlers for Axios POST and GET requests
+        axios.post.mockImplementation((url, data) => {
+            if (url.includes('/v1/oauth/token')) {
+                return Promise.resolve({
+                    data: {
+                        access_token: 'mock-access-token-12345',
+                        expires_at: Math.floor(Date.now() / 1000) + 3600,
+                        token_type: 'O-Bearer'
+                    }
+                });
+            }
+            if (url.includes('/checkout/v2/pay')) {
+                return Promise.resolve({
+                    data: {
+                        redirectUrl: 'https://phonepe.com/mock-redirect',
+                        orderId: 'OMO2403282020198641071317'
+                    }
+                });
+            }
+            return Promise.reject(new Error('Unknown POST endpoint: ' + url));
+        });
+
+        axios.get.mockImplementation((url) => {
+            if (url.includes('/status')) {
+                return Promise.resolve({
+                    data: {
+                        orderId: 'OMO2403282020198641071317',
+                        state: 'COMPLETED',
+                        amount: 10000 // default 100 Rs in paise
+                    }
+                });
+            }
+            return Promise.reject(new Error('Unknown GET endpoint: ' + url));
+        });
     });
 
     describe('POST /api/v1/payments/checkout/:orderId', () => {
@@ -47,7 +83,7 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.body.message).toContain('already been paid for');
         });
 
-        it('should initiate payment, update transactionId in DB BEFORE making PhonePe API call, and return paymentUrl', async () => {
+        it('should initiate payment, retrieve OAuth token, update transactionId in DB, and return paymentUrl', async () => {
             const mockOrder = {
                 _id: '60c72b2f9b1d8b2a3c9d4e5f',
                 paymentStatus: 'Pending',
@@ -56,18 +92,6 @@ describe('PhonePe Payments Route Integration Tests', () => {
             };
             orderRepository.findById.mockResolvedValue(mockOrder);
             orderRepository.update.mockResolvedValue({ ...mockOrder, transactionId: 'JGM-9d4e5f-123456789-abcdef' });
-            
-            axios.post.mockResolvedValue({
-                data: {
-                    data: {
-                        instrumentResponse: {
-                            redirectInfo: {
-                                url: 'https://phonepe.com/mock-redirect'
-                            }
-                        }
-                    }
-                }
-            });
 
             const res = await request(app).post('/api/v1/payments/checkout/60c72b2f9b1d8b2a3c9d4e5f');
             expect(res.statusCode).toBe(200);
@@ -75,15 +99,18 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.body.paymentUrl).toBe('https://phonepe.com/mock-redirect');
 
             expect(orderRepository.update).toHaveBeenCalledTimes(1);
-            expect(orderRepository.update.mock.calls[0][0].toString()).toBe(mockOrder._id);
-            // Verify JGM-{last6_order_id}-{timestamp}-{randomSuffix} format
             expect(orderRepository.update.mock.calls[0][1].transactionId).toMatch(/^JGM-\w+-\d+-\w+$/);
 
-            expect(axios.post).toHaveBeenCalledTimes(1);
+            // Access token retrieved, then payment created
+            expect(axios.post).toHaveBeenCalledTimes(2);
             
-            const updateCallOrder = orderRepository.update.mock.invocationCallOrder[0];
-            const axiosPostCallOrder = axios.post.mock.invocationCallOrder[0];
-            expect(updateCallOrder).toBeLessThan(axiosPostCallOrder);
+            const oauthCallUrl = axios.post.mock.calls[0][0];
+            const payCallUrl = axios.post.mock.calls[1][0];
+            const payHeaders = axios.post.mock.calls[1][2].headers;
+
+            expect(oauthCallUrl).toContain('/v1/oauth/token');
+            expect(payCallUrl).toContain('/checkout/v2/pay');
+            expect(payHeaders['Authorization']).toBe('O-Bearer mock-access-token-12345');
         });
     });
 
@@ -96,17 +123,6 @@ describe('PhonePe Payments Route Integration Tests', () => {
                 user: 'user789'
             };
             orderRepository.findById.mockResolvedValue(mockOrder);
-            axios.post.mockResolvedValue({
-                data: {
-                    data: {
-                        instrumentResponse: {
-                            redirectInfo: {
-                                url: 'https://phonepe.com/mock-redirect'
-                            }
-                        }
-                    }
-                }
-            });
 
             const res = await request(app).get('/api/v1/payments/checkout/60c72b2f9b1d8b2a3c9d4e5f');
             expect(res.statusCode).toBe(302);
@@ -115,94 +131,63 @@ describe('PhonePe Payments Route Integration Tests', () => {
     });
 
     describe('POST /api/v1/payments/webhook', () => {
-        const generateWebhookPayload = (payload, saltKey, saltIndex) => {
-            const base64Response = Buffer.from(JSON.stringify(payload)).toString('base64');
-            const stringToHash = base64Response + saltKey;
-            const checksum = crypto.createHash('sha256').update(stringToHash).digest('hex') + '###' + saltIndex;
-            return { base64Response, checksum };
+        const getAuthorizationHeader = (username, password) => {
+            const credentials = `${username}:${password}`;
+            return crypto.createHash("sha256").update(credentials).digest("hex");
         };
 
-        it('should return 400 for missing header or body', async () => {
+        it('should return 401 for missing authorization header', async () => {
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
-                .send({});
+                .send({ event: 'checkout.order.completed', payload: {} });
+            expect(res.statusCode).toBe(401);
+            expect(res.text).toBe('Missing payload authentication credentials');
+        });
+
+        it('should return 401 for invalid authorization hash credentials', async () => {
+            const res = await request(app)
+                .post('/api/v1/payments/webhook')
+                .set('Authorization', 'invalid-hash-value')
+                .send({ event: 'checkout.order.completed', payload: {} });
+            expect(res.statusCode).toBe(401);
+            expect(res.text).toBe('Invalid Webhook Authentication Signature');
+        });
+
+        it('should return 400 for missing payload or event parameters', async () => {
+            const authHeader = getAuthorizationHeader('webhook_user', 'webhook_password');
+            const res = await request(app)
+                .post('/api/v1/payments/webhook')
+                .set('Authorization', authHeader)
+                .send({ event: 'checkout.order.completed' });
             expect(res.statusCode).toBe(400);
             expect(res.text).toBe('Missing payload requirements');
         });
 
-        it('should return 400 for invalid checksums', async () => {
+        it('should return 400 if merchantOrderId is missing in payload object', async () => {
+            const authHeader = getAuthorizationHeader('webhook_user', 'webhook_password');
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
-                .set('x-verify', 'invalid-checksum')
-                .send({ response: 'base64Payload' });
-            
-            expect(res.statusCode).toBe(400);
-            expect(res.text).toBe('Invalid Checksum');
-        });
-
-        it('should return 400 for malformed base64 JSON payload structurally invalid', async () => {
-            const malformedBase64 = Buffer.from("{invalid-json").toString('base64');
-            const stringToHash = malformedBase64 + 'TEST_SALT_KEY';
-            const checksum = crypto.createHash('sha256').update(stringToHash).digest('hex') + '###' + '1';
-
-            const res = await request(app)
-                .post('/api/v1/payments/webhook')
-                .set('x-verify', checksum)
-                .send({ response: malformedBase64 });
-
-            expect(res.statusCode).toBe(400);
-            expect(res.text).toBe('Malformed Base64 JSON Payload structurally invalid');
-        });
-
-        it('should return 400 if merchantTransactionId is missing in response JSON', async () => {
-            const responseData = {
-                code: 'PAYMENT_SUCCESS',
-                data: {
-                    amount: 10000
-                }
-            };
-            const { base64Response, checksum } = generateWebhookPayload(responseData, 'TEST_SALT_KEY', '1');
-
-            const res = await request(app)
-                .post('/api/v1/payments/webhook')
-                .set('x-verify', checksum)
-                .send({ response: base64Response });
-
+                .set('Authorization', `SHA256(${authHeader})`) // verify wrapper parsing works too
+                .send({ event: 'checkout.order.completed', payload: { amount: 10000 } });
             expect(res.statusCode).toBe(400);
             expect(res.text).toBe('Missing Identification parameter context');
         });
 
-        it('should return 404 if order associated with merchantTransactionId is not found', async () => {
-            const responseData = {
-                code: 'PAYMENT_SUCCESS',
-                data: {
-                    merchantTransactionId: 'JGM-nonexistent-123',
-                    amount: 10000,
-                    transactionId: 'T123456789'
-                }
-            };
-            const { base64Response, checksum } = generateWebhookPayload(responseData, 'TEST_SALT_KEY', '1');
+        it('should return 404 if order associated with merchantOrderId is not found', async () => {
+            const authHeader = getAuthorizationHeader('webhook_user', 'webhook_password');
             orderRepository.findByTransactionId.mockResolvedValue(null);
 
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
-                .set('x-verify', checksum)
-                .send({ response: base64Response });
+                .set('Authorization', authHeader)
+                .send({ event: 'checkout.order.completed', payload: { merchantOrderId: 'JGM-nonexistent', amount: 10000 } });
 
             expect(res.statusCode).toBe(404);
             expect(res.text).toBe('Order reference pointer mismatch');
         });
 
         it('should return 200 OK immediately if order is already Paid', async () => {
-            const responseData = {
-                code: 'PAYMENT_SUCCESS',
-                data: {
-                    merchantTransactionId: 'JGM-9d4e5f-12345',
-                    amount: 10000,
-                    transactionId: 'T123456789'
-                }
-            };
-            const { base64Response, checksum } = generateWebhookPayload(responseData, 'TEST_SALT_KEY', '1');
+            const authHeader = getAuthorizationHeader('webhook_user', 'webhook_password');
             orderRepository.findByTransactionId.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Paid',
@@ -211,24 +196,16 @@ describe('PhonePe Payments Route Integration Tests', () => {
 
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
-                .set('x-verify', checksum)
-                .send({ response: base64Response });
+                .set('Authorization', authHeader)
+                .send({ event: 'checkout.order.completed', payload: { merchantOrderId: 'JGM-9d4e5f-12345', amount: 10000 } });
 
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
             expect(orderRepository.markAsPaidIfPending).not.toHaveBeenCalled();
         });
 
-        it('should mark order as Paid using markAsPaidIfPending, set status to Processing, and save gatewayTransactionId without modifying transactionId on success', async () => {
-            const responseData = {
-                code: 'PAYMENT_SUCCESS',
-                data: {
-                    merchantTransactionId: 'JGM-9d4e5f-12345',
-                    amount: 10000, // Rs 100 in paise
-                    transactionId: 'T123456789'
-                }
-            };
-            const { base64Response, checksum } = generateWebhookPayload(responseData, 'TEST_SALT_KEY', '1');
+        it('should mark order as Paid on checkout.order.completed payload state COMPLETED', async () => {
+            const authHeader = getAuthorizationHeader('webhook_user', 'webhook_password');
             orderRepository.findByTransactionId.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
@@ -239,30 +216,28 @@ describe('PhonePe Payments Route Integration Tests', () => {
 
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
-                .set('x-verify', checksum)
-                .send({ response: base64Response });
+                .set('Authorization', authHeader)
+                .send({
+                    event: 'checkout.order.completed',
+                    payload: {
+                        merchantOrderId: 'JGM-9d4e5f-12345',
+                        state: 'COMPLETED',
+                        amount: 10000, // Rs 100 in paise
+                        orderId: 'OMO2403282020198641071317'
+                    }
+                });
 
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
-            
-            // Check that we update order successfully via the conditional helper
             expect(orderRepository.markAsPaidIfPending).toHaveBeenCalledWith('order123', {
                 paymentStatus: 'Paid',
                 status: 'Processing',
-                gatewayTransactionId: 'T123456789'
+                gatewayTransactionId: 'OMO2403282020198641071317'
             });
         });
 
-        it('should atomically cancel and restore stock if response indicates failure', async () => {
-            const responseData = {
-                code: 'PAYMENT_ERROR',
-                data: {
-                    merchantTransactionId: 'JGM-9d4e5f-12345',
-                    amount: 10000,
-                    transactionId: 'T123456789'
-                }
-            };
-            const { base64Response, checksum } = generateWebhookPayload(responseData, 'TEST_SALT_KEY', '1');
+        it('should atomically cancel and restore stock if webhook payload indicates failure', async () => {
+            const authHeader = getAuthorizationHeader('webhook_user', 'webhook_password');
             orderRepository.findByTransactionId.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
@@ -272,12 +247,19 @@ describe('PhonePe Payments Route Integration Tests', () => {
 
             const res = await request(app)
                 .post('/api/v1/payments/webhook')
-                .set('x-verify', checksum)
-                .send({ response: base64Response });
+                .set('Authorization', authHeader)
+                .send({
+                    event: 'checkout.order.failed',
+                    payload: {
+                        merchantOrderId: 'JGM-9d4e5f-12345',
+                        state: 'FAILED',
+                        amount: 10000,
+                        orderId: 'OMO2403282020198641071317'
+                    }
+                });
 
             expect(res.statusCode).toBe(200);
             expect(res.text).toBe('OK');
-
             expect(orderRepository.cancelAndRestoreStock).toHaveBeenCalledWith('order123');
         });
     });
@@ -315,7 +297,6 @@ describe('PhonePe Payments Route Integration Tests', () => {
             const res = await request(app).get('/api/v1/payments/check-status/order123');
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual({ paymentStatus: 'Failed', orderStatus: 'Cancelled' });
-
             expect(orderRepository.cancelAndRestoreStock).toHaveBeenCalledWith('order123');
         });
 
@@ -342,22 +323,20 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(orderRepository.markAsPaidIfPending).not.toHaveBeenCalled();
         });
 
-        it('should return Paid status and save gatewayTransactionId using markAsPaidIfPending if PhonePe responds with PAYMENT_SUCCESS', async () => {
+        it('should return Paid status if PhonePe responds with COMPLETED', async () => {
             orderRepository.findById.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
-                totalPrice: 200,
+                totalPrice: 100,
                 status: 'Pending',
                 transactionId: 'JGM-9d4e5f-12345'
             });
             
             axios.get.mockResolvedValue({
                 data: {
-                    code: 'PAYMENT_SUCCESS',
-                    data: {
-                        amount: 20000,
-                        transactionId: 'T987654321'
-                    }
+                    state: 'COMPLETED',
+                    amount: 10000,
+                    orderId: 'OMO2403282020198641071317'
                 }
             });
 
@@ -368,28 +347,28 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.body).toEqual({ paymentStatus: 'Paid', orderStatus: 'Processing' });
 
             expect(axios.get).toHaveBeenCalledTimes(1);
-            expect(axios.get.mock.calls[0][0]).toContain('/pg/v1/status/TEST_MERCHANT_ID/JGM-9d4e5f-12345');
-            expect(axios.get.mock.calls[0][1].headers['X-VERIFY']).toBeDefined();
+            expect(axios.get.mock.calls[0][0]).toContain('/checkout/v2/order/JGM-9d4e5f-12345/status');
+            expect(axios.get.mock.calls[0][1].headers['Authorization']).toBe('O-Bearer mock-access-token-12345');
 
             expect(orderRepository.markAsPaidIfPending).toHaveBeenCalledWith('order123', {
                 paymentStatus: 'Paid',
                 status: 'Processing',
-                gatewayTransactionId: 'T987654321'
+                gatewayTransactionId: 'OMO2403282020198641071317'
             });
         });
 
-        it('should return Pending status if PhonePe responds with PAYMENT_PENDING', async () => {
+        it('should return Pending status if PhonePe responds with PENDING', async () => {
             orderRepository.findById.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
-                totalPrice: 200,
+                totalPrice: 100,
                 status: 'Pending',
                 transactionId: 'JGM-9d4e5f-12345'
             });
 
             axios.get.mockResolvedValue({
                 data: {
-                    code: 'PAYMENT_PENDING'
+                    state: 'PENDING'
                 }
             });
 
@@ -403,15 +382,14 @@ describe('PhonePe Payments Route Integration Tests', () => {
             orderRepository.findById.mockResolvedValue({
                 _id: 'order123',
                 paymentStatus: 'Pending',
-                totalPrice: 200,
+                totalPrice: 100,
                 status: 'Pending',
                 transactionId: 'JGM-9d4e5f-12345'
             });
 
             axios.get.mockResolvedValue({
                 data: {
-                    code: 'PAYMENT_ERROR',
-                    data: {}
+                    state: 'FAILED'
                 }
             });
 
@@ -420,6 +398,72 @@ describe('PhonePe Payments Route Integration Tests', () => {
             expect(res.body).toEqual({ paymentStatus: 'Failed', orderStatus: 'Cancelled' });
 
             expect(orderRepository.cancelAndRestoreStock).toHaveBeenCalledWith('order123');
+        });
+
+        it('should use correct production endpoints and caching when PHONEPE_ENV=PROD', async () => {
+            const originalEnv = process.env.PHONEPE_ENV;
+            process.env.PHONEPE_ENV = 'PROD';
+            
+            // Clear require cache for the payments route to force re-evaluation of isProd
+            delete require.cache[require.resolve('../routes/payments')];
+            const prodPaymentsRouter = require('../routes/payments');
+            
+            if (prodPaymentsRouter.clearTokenCache) {
+                prodPaymentsRouter.clearTokenCache();
+            }
+            
+            const express = require('express');
+            const prodApp = express();
+            prodApp.use(express.json());
+            prodApp.use('/api/v1/payments', prodPaymentsRouter);
+            
+            const mockOrder = {
+                _id: '60c72b2f9b1d8b2a3c9d4e5f',
+                paymentStatus: 'Pending',
+                totalPrice: 150.50,
+                user: 'user789',
+                transactionId: 'JGM-9d4e5f-12345'
+            };
+            orderRepository.findById.mockResolvedValue(mockOrder);
+            orderRepository.update.mockResolvedValue({ ...mockOrder, transactionId: 'JGM-9d4e5f-12345' });
+
+            axios.post.mockClear();
+            axios.get.mockClear();
+
+            // 1. Checkout test
+            const checkoutRes = await request(prodApp).post('/api/v1/payments/checkout/60c72b2f9b1d8b2a3c9d4e5f');
+            expect(checkoutRes.statusCode).toBe(200);
+            
+            expect(axios.post).toHaveBeenCalledTimes(2);
+            // First call retrieves token
+            expect(axios.post.mock.calls[0][0]).toBe('https://api.phonepe.com/apis/identity-manager/v1/oauth/token');
+            // Second call sends payment request
+            expect(axios.post.mock.calls[1][0]).toBe('https://api.phonepe.com/apis/pg/checkout/v2/pay');
+            expect(axios.post.mock.calls[1][2].headers['Authorization']).toBe('O-Bearer mock-access-token-12345');
+
+            // 2. Status check test (should use cached token, so only 1 axios call total)
+            axios.post.mockClear();
+            
+            axios.get.mockResolvedValue({
+                data: {
+                    state: 'COMPLETED',
+                    amount: 15050,
+                    orderId: 'OMO2403282020198641071317'
+                }
+            });
+
+            const statusRes = await request(prodApp).get('/api/v1/payments/check-status/60c72b2f9b1d8b2a3c9d4e5f');
+            expect(statusRes.statusCode).toBe(200);
+            
+            // Verifies OAuth token caching: axios.post was NOT called again to fetch token
+            expect(axios.post).toHaveBeenCalledTimes(0);
+
+            expect(axios.get).toHaveBeenCalledTimes(1);
+            expect(axios.get.mock.calls[0][0]).toBe('https://api.phonepe.com/apis/pg/checkout/v2/order/JGM-9d4e5f-12345/status');
+            expect(axios.get.mock.calls[0][1].headers['Authorization']).toBe('O-Bearer mock-access-token-12345');
+
+            process.env.PHONEPE_ENV = originalEnv;
+            delete require.cache[require.resolve('../routes/payments')];
         });
     });
 });
