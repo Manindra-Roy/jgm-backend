@@ -23,7 +23,21 @@ function errorHandler(err, req, res, next) {
         });
     }
 
-    // 4. Catch-All Server Crash (The Security Mask)
+    // 4. Multer Upload Errors
+    if (err.name === 'MulterError') {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({
+                success: false,
+                message: "File is too large. Maximum size allowed is 10MB."
+            });
+        }
+        return res.status(400).json({
+            success: false,
+            message: err.message
+        });
+    }
+
+    // 5. Catch-All Server Crash (The Security Mask)
     const isProduction = process.env.NODE_ENV !== 'development';
     
     return res.status(500).json({ 
