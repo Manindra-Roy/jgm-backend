@@ -171,9 +171,10 @@ router.post("/:id/email", async (req, res) => {
             return res.status(400).json({ message: "No email address found for this order." });
         }
 
-        await sendInvoiceEmail(userEmail, order);
+        const deliveryMethod = req.body.method || 'smtp';
+        await sendInvoiceEmail(userEmail, order, deliveryMethod);
 
-        res.status(200).json({ success: true, message: "Invoice emailed successfully" });
+        res.status(200).json({ success: true, message: `Invoice emailed successfully via ${deliveryMethod.toUpperCase()}` });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

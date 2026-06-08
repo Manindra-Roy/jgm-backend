@@ -18,26 +18,24 @@ if (isProduction) {
     console.log('  BREVO_PASS loaded:', !!process.env.BREVO_PASS);
 }
 
-// --- LOCAL DEV TRANSPORTER (Gmail SMTP) ---
-let localTransporter = null;
-if (!isProduction) {
-    localTransporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
-    });
-
-    if (process.env.NODE_ENV !== 'test') {
-        localTransporter.verify()
-            .then(() => console.log('✅ SMTP verified — Gmail is ready to send emails'))
-            .catch((err) => {
-                console.error('❌ SMTP verification FAILED:', err.message);
-                console.error('❌ Error code:', err.code);
-            });
+// --- SMTP TRANSPORTER (Gmail SMTP) ---
+const smtpTransporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
     }
+});
+
+if (process.env.NODE_ENV !== 'test') {
+    smtpTransporter.verify()
+        .then(() => console.log('✅ SMTP verified — Gmail is ready to send emails'))
+        .catch((err) => {
+            console.error('❌ SMTP verification FAILED:', err.message);
+            console.error('❌ Error code:', err.code);
+        });
 }
+
 
 // The "from" address: In production use the verified Brevo sender, locally use Gmail
 const getFromAddress = () => {
@@ -186,7 +184,7 @@ const sendContactEmail = async (name, email, subject, message) => {
     }
 
     // Local dev — use Gmail SMTP
-    return localTransporter.sendMail({
+    return smtpTransporter.sendMail({
         from: getFromAddress(),
         to: process.env.EMAIL_USER,
         replyTo: email,
@@ -199,9 +197,10 @@ const sendContactEmail = async (name, email, subject, message) => {
  * Dispatches an HTML-formatted email containing the order invoice.
  * @param {string} userEmail - The recipient's email address.
  * @param {Object} order - The order object.
+ * @param {string} method - Delivery method: 'smtp' or 'brevo'.
  * @returns {Promise<any>} A promise that resolves when the email is sent.
  */
-const sendInvoiceEmail = async (userEmail, order) => {
+const sendInvoiceEmail = async (userEmail, order, method = 'smtp') => {
     const subject = `Your Invoice for Order #${order.id}`;
     
     // Create items HTML
@@ -253,12 +252,12 @@ const sendInvoiceEmail = async (userEmail, order) => {
         </div>
     `;
 
-    if (isProduction) {
+    if (method === 'brevo') {
         return sendViaBrevoAPI({ to: userEmail, subject, html });
     }
 
-    // Local dev — use Gmail SMTP
-    return localTransporter.sendMail({
+    // Default to SMTP
+    return smtpTransporter.sendMail({
         from: `"JGM Industries" <${getFromAddress()}>`,
         to: userEmail,
         subject,
